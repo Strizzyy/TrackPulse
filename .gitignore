@@ -1,0 +1,25 @@
+# Real F1 broadcast footage used for local testing -- large, copyrighted,
+# not meant to be redistributed via the repo. Backend/frontend have their
+# own .gitignore for nested artifacts; this catches root-level stray files.
+*.mp4
+*.mov
+*.mkv
+
+# Local tool/session state, not part of the project
+.claude/
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
+
+# Belt-and-suspenders re-declaration of nested ignores (each subfolder
+# already has its own .gitignore, but this covers the root git add too)
+backend/.venv/
+backend/.hf_cache/
+backend/.fastf1cache/
+backend/data/uploads/*
+!backend/data/uploads/.gitkeep
+backend/.env
+backend/reference_footage/
+frontend/node_modules/
+frontend/dist/

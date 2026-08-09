@@ -1,0 +1,26 @@
+{
+  "track_id": "silverstone",
+  "name": "Silverstone Circuit (GP Layout)",
+  "avg_lap_time_sec": 90.5,
+  "lat": 52.0786,
+  "lon": -1.0169,
+  "note": "Corner list and start_pct/end_pct are rough placeholder estimates for MVP wiring, not surveyed sector data. Data teammate: refine using real sector splits if time allows -- the backend reads this generically, so no code changes are needed when you swap in better numbers.",
+  "corners": [
+    { "name": "Abbey", "start_pct": 0.00, "end_pct": 0.04 },
+    { "name": "Farm Curve", "start_pct": 0.04, "end_pct": 0.08 },
+    { "name": "Village", "start_pct": 0.08, "end_pct": 0.12 },
+    { "name": "The Loop", "start_pct": 0.12, "end_pct": 0.16 },
+    { "name": "Aintree", "start_pct": 0.16, "end_pct": 0.20 },
+    { "name": "Wellington Straight", "start_pct": 0.20, "end_pct": 0.28 },
+    { "name": "Brooklands", "start_pct": 0.28, "end_pct": 0.33 },
+    { "name": "Luffield", "start_pct": 0.33, "end_pct": 0.39 },
+    { "name": "Woodcote", "start_pct": 0.39, "end_pct": 0.44 },
+    { "name": "Copse", "start_pct": 0.44, "end_pct": 0.50 },
+    { "name": "Maggotts-Becketts", "start_pct": 0.50, "end_pct": 0.58 },
+    { "name": "Chapel", "start_pct": 0.58, "end_pct": 0.62 },
+    { "name": "Hangar Straight", "start_pct": 0.62, "end_pct": 0.72 },
+    { "name": "Stowe", "start_pct": 0.72, "end_pct": 0.78 },
+    { "name": "Vale", "start_pct": 0.78, "end_pct": 0.85 },
+    { "name": "Club", "start_pct": 0.85, "end_pct": 1.00 }
+  ]
+}
