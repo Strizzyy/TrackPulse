@@ -1,0 +1,28 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Model cache (redirected here in vision.py, don't want ~600MB in git)
+.hf_cache/
+.fastf1cache/
+
+# Per-session upload/frame data
+data/uploads/*
+!data/uploads/.gitkeep
+
+# Data-teammate scratch footage
+reference_footage/
+
+# Secrets
+.env
+
+# Ad-hoc test artifacts (leading underscore = scratch, not tracked)
+/_*
+

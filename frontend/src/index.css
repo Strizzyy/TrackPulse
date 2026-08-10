@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+/* F1 brand palette: Warm Red #FF1E00 / Carbon Black #15151E (official F1 hex codes),
+   with carbon steps for surfaces. Titillium Web is F1's classic typeface. */
+@theme {
+  --font-sans: "Titillium Web", system-ui, "Segoe UI", Roboto, sans-serif;
+
+  --color-f1-red: #ff1e00;
+  --color-f1-red-dark: #c81800;
+
+  --color-carbon-950: #0b0b12;
+  --color-carbon-900: #15151e;
+  --color-carbon-850: #1c1c27;
+  --color-carbon-800: #23232f;
+  --color-carbon-700: #2e2e3c;
+  --color-carbon-600: #3b3b4a;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-carbon-900);
+  color: #e5e7eb;
+}
