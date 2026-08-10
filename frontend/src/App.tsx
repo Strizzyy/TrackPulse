@@ -289,6 +289,38 @@ function App() {
               <p className="mb-3 text-sm text-neutral-400">{session.trend.summary}</p>
               <LapTrend report={session} />
             </Panel>
+
+            {/* Session mode computes a forecast too -- it was being dropped on
+                the floor while lap mode showed it. */}
+            <Panel
+              title="Weather forecast + projection"
+              right={
+                <span className="font-mono text-xs tabular-nums text-neutral-500">
+                  {session.forecast.rain_probability_pct}% rain ·{" "}
+                  {session.forecast.precipitation_mm}mm
+                </span>
+              }
+            >
+              <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2 text-sm">
+                <div>
+                  <span className="text-xs uppercase tracking-wider text-neutral-500">
+                    Next {session.forecast.horizon_laps.length} laps{" "}
+                  </span>
+                  <span className="font-mono tabular-nums text-neutral-200">
+                    {session.forecast.projected_wetness.slice(0, 6).join(" → ")}
+                    {session.forecast.projected_wetness.length > 6 && " …"}
+                  </span>
+                </div>
+              </div>
+              <p className="mt-2 border-t border-carbon-800 pt-2 text-xs text-neutral-500">
+                {session.forecast.forecast_rationale} Projection = measured slope{" "}
+                {session.forecast.measured_slope >= 0 ? "+" : ""}
+                {session.forecast.measured_slope} + weather{" "}
+                {session.forecast.weather_adjustment >= 0 ? "+" : ""}
+                {session.forecast.weather_adjustment} per lap.
+              </p>
+            </Panel>
+
             <RecommendationPanel
               recommendation={session.recommendation}
               safetyCarRisk={session.safety_car_risk}

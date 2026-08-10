@@ -162,10 +162,17 @@ export interface StrategyReport {
   conditions: StrategyConditions;
   projected_wetness_by_lap: number[] | null;
   strategy: StrategyPlan;
+  safety_car_risk: SafetyCarRisk;
   circuit_inputs: {
     avg_lap_time_sec: number | null;
     pit_loss_sec: number | null;
     degradation: Record<string, CompoundDegradation>;
+    // "measured" only when the per-circuit regression passed its plausibility
+    // check. It usually doesn't, and the simulation runs on reference values --
+    // the UI must say so rather than implying real degradation drives it.
+    degradation_confidence: "high" | "low" | null;
+    degradation_note: string | null;
+    degradation_in_use: "measured" | "reference";
     sc_or_vsc_rate_pct: number | null;
     source: string;
   };

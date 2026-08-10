@@ -248,10 +248,27 @@ async def strategy_plan(
         "conditions": conditions,
         "projected_wetness_by_lap": wetness_by_lap,
         "strategy": plan,
+        "safety_car_risk": history.get_sc_risk(
+            (conditions.get("slope_per_lap") or 0.0),
+            conditions.get("current_wetness") or 0.0,
+            circuit=circuit,
+        ),
         "circuit_inputs": {
             "avg_lap_time_sec": circuit.get("avg_lap_time_sec"),
             "pit_loss_sec": circuit.get("pit_loss_sec"),
             "degradation": circuit.get("degradation"),
+            # Whether the measured degradation above is actually driving the
+            # simulation. It usually is NOT -- real stint data comes out
+            # non-monotonic across compounds, so race_sim falls back to
+            # reference values. Shipping the numbers without this flag would
+            # imply the simulation is running on measured data when it isn't.
+            "degradation_confidence": circuit.get("degradation_confidence"),
+            "degradation_note": circuit.get("degradation_note"),
+            "degradation_in_use": (
+                "reference"
+                if circuit.get("degradation_confidence") == "low"
+                else "measured"
+            ),
             "sc_or_vsc_rate_pct": circuit.get("sc_or_vsc_rate_pct"),
             "source": circuit.get("source"),
         },
