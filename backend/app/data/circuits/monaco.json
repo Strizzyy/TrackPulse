@@ -1,0 +1,203 @@
+{
+  "circuit_id": "monaco",
+  "name": "Circuit de Monaco",
+  "lat": 43.7347,
+  "lon": 7.4206,
+  "source": "FastF1 race sessions 2019-2025",
+  "race_laps": 78,
+  "lap_distance_m": 3284.2,
+  "avg_lap_time_sec": 78.62,
+  "pit_loss_sec": 20.5,
+  "rain_frequency_pct": 42.9,
+  "degradation": {
+    "HARD": {
+      "s_per_lap": 0.0272,
+      "typical_stint_laps": 40,
+      "max_observed_stint_laps": 63,
+      "median_fit_r2": 0.259,
+      "samples": 88,
+      "s_per_lap_per_stint": 0.018,
+      "races_in_panel": 7,
+      "method": "panel regression, track-evolution controlled"
+    },
+    "INTERMEDIATE": {
+      "s_per_lap": -0.8875,
+      "typical_stint_laps": 16,
+      "max_observed_stint_laps": 17,
+      "median_fit_r2": 0.918,
+      "samples": 22,
+      "method": "per-stint regression (no panel estimate available)"
+    },
+    "MEDIUM": {
+      "s_per_lap": 0.0059,
+      "typical_stint_laps": 26,
+      "max_observed_stint_laps": 49,
+      "median_fit_r2": 0.175,
+      "samples": 84,
+      "s_per_lap_per_stint": 0.0093,
+      "races_in_panel": 7,
+      "method": "panel regression, track-evolution controlled"
+    },
+    "SOFT": {
+      "s_per_lap": 0.0337,
+      "typical_stint_laps": 18,
+      "max_observed_stint_laps": 33,
+      "median_fit_r2": 0.142,
+      "samples": 51,
+      "s_per_lap_per_stint": 0.0147,
+      "races_in_panel": 7,
+      "method": "panel regression, track-evolution controlled"
+    },
+    "WET": {
+      "s_per_lap": -0.7371,
+      "typical_stint_laps": 12,
+      "max_observed_stint_laps": 13,
+      "median_fit_r2": 0.911,
+      "samples": 17,
+      "method": "per-stint regression (no panel estimate available)"
+    }
+  },
+  "track_evolution_sec_per_lap": -0.0064,
+  "corners": [
+    {
+      "name": "Turn 1",
+      "number": 1,
+      "distance_m": 186.5,
+      "start_pct": 0.0,
+      "end_pct": 0.1169
+    },
+    {
+      "name": "Turn 2",
+      "number": 2,
+      "distance_m": 581.7,
+      "start_pct": 0.1169,
+      "end_pct": 0.2019
+    },
+    {
+      "name": "Turn 3",
+      "number": 3,
+      "distance_m": 744.1,
+      "start_pct": 0.2019,
+      "end_pct": 0.2462
+    },
+    {
+      "name": "Turn 4",
+      "number": 4,
+      "distance_m": 873.2,
+      "start_pct": 0.2462,
+      "end_pct": 0.3008
+    },
+    {
+      "name": "Turn 5",
+      "number": 5,
+      "distance_m": 1102.8,
+      "start_pct": 0.3008,
+      "end_pct": 0.3541
+    },
+    {
+      "name": "Turn 6",
+      "number": 6,
+      "distance_m": 1222.9,
+      "start_pct": 0.3541,
+      "end_pct": 0.3847
+    },
+    {
+      "name": "Turn 7",
+      "number": 7,
+      "distance_m": 1304.2,
+      "start_pct": 0.3847,
+      "end_pct": 0.4101
+    },
+    {
+      "name": "Turn 8",
+      "number": 8,
+      "distance_m": 1389.7,
+      "start_pct": 0.4101,
+      "end_pct": 0.4726
+    },
+    {
+      "name": "Turn 9",
+      "number": 9,
+      "distance_m": 1714.8,
+      "start_pct": 0.4726,
+      "end_pct": 0.5728
+    },
+    {
+      "name": "Turn 10",
+      "number": 10,
+      "distance_m": 2047.8,
+      "start_pct": 0.5728,
+      "end_pct": 0.632
+    },
+    {
+      "name": "Turn 11",
+      "number": 11,
+      "distance_m": 2103.4,
+      "start_pct": 0.632,
+      "end_pct": 0.6745
+    },
+    {
+      "name": "Turn 12",
+      "number": 12,
+      "distance_m": 2326.7,
+      "start_pct": 0.6745,
+      "end_pct": 0.7328
+    },
+    {
+      "name": "Turn 13",
+      "number": 13,
+      "distance_m": 2486.3,
+      "start_pct": 0.7328,
+      "end_pct": 0.7629
+    },
+    {
+      "name": "Turn 14",
+      "number": 14,
+      "distance_m": 2524.9,
+      "start_pct": 0.7629,
+      "end_pct": 0.7874
+    },
+    {
+      "name": "Turn 15",
+      "number": 15,
+      "distance_m": 2647.1,
+      "start_pct": 0.7874,
+      "end_pct": 0.8109
+    },
+    {
+      "name": "Turn 16",
+      "number": 16,
+      "distance_m": 2679.1,
+      "start_pct": 0.8109,
+      "end_pct": 0.8251
+    },
+    {
+      "name": "Turn 17",
+      "number": 17,
+      "distance_m": 2740.8,
+      "start_pct": 0.8251,
+      "end_pct": 0.8528
+    },
+    {
+      "name": "Turn 18",
+      "number": 18,
+      "distance_m": 2861.0,
+      "start_pct": 0.8528,
+      "end_pct": 0.8847
+    },
+    {
+      "name": "Turn 19",
+      "number": 19,
+      "distance_m": 2950.0,
+      "start_pct": 0.8847,
+      "end_pct": 1.0
+    }
+  ],
+  "corner_count": 19,
+  "corner_source": "fastf1_circuit_info",
+  "sessions_analyzed": 7,
+  "sc_or_vsc_rate_pct": 71.4,
+  "avg_first_deployment_lap": 7.8,
+  "degradation_confidence": "low",
+  "degradation_note": "Measured degradation is not monotonic across compounds (SOFT=0.0337, MEDIUM=0.0059, HARD=0.0272); reference values are used for simulation instead."
+}

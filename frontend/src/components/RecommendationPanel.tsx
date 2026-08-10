@@ -33,8 +33,21 @@ export default function RecommendationPanel({
 
       <div className="rounded-lg border border-gray-300 p-4">
         <div className="text-xs uppercase tracking-wide text-gray-500">Safety car risk</div>
-        <div className="text-lg font-semibold">{safetyCarRisk.risk_pct}%</div>
+        <div className="flex items-baseline gap-3">
+          <span className="text-lg font-semibold">{safetyCarRisk.risk_pct}%</span>
+          {safetyCarRisk.expected_first_sc_lap !== null && (
+            <span className="text-sm text-gray-700">
+              first deployment expected ~lap{" "}
+              <span className="font-semibold">{Math.round(safetyCarRisk.expected_first_sc_lap)}</span>
+              {safetyCarRisk.sc_window_laps &&
+                ` (laps ${safetyCarRisk.sc_window_laps[0]}-${safetyCarRisk.sc_window_laps[1]})`}
+            </span>
+          )}
+        </div>
         <div className="mt-1 text-sm text-gray-600">{safetyCarRisk.rationale}</div>
+        {safetyCarRisk.sc_timing_note && (
+          <div className="mt-1 text-sm text-gray-600">{safetyCarRisk.sc_timing_note}</div>
+        )}
       </div>
 
       <div className="rounded-lg border border-gray-300 bg-gray-50 p-4">

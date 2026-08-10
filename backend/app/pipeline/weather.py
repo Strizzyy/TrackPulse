@@ -6,15 +6,32 @@ SILVERSTONE_LAT = 52.0786
 SILVERSTONE_LON = -1.0169
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 
+# Per-lap wetness adjustments, applied on top of the visually-measured slope.
+# Stated constants rather than a fitted curve: the whole point of this module
+# is that a strategist can see why the projection bends the way it does.
+RAIN_FALLING_ADJUSTMENT = 0.05  # rain actually measured in the forecast window
+RAIN_LIKELY_ADJUSTMENT = 0.02  # high chance of rain but none falling yet
+DRYING_ADJUSTMENT = -0.01  # no rain signal: track sheds water lap on lap
+
+RAIN_FALLING_MM = 0.1  # mm over the window that counts as "it is raining"
+RAIN_LIKELY_PCT = 50.0  # probability at/above which we lean wet pre-emptively
+
 
 async def get_precipitation_forecast(minutes_ahead: int = 15) -> Dict:
     """Free, no-API-key precipitation forecast. Fails soft: on any error
     (no network, rate limit, etc.) returns available=False so the caller
-    can fall back to trend-only projection instead of crashing the request."""
+    can fall back to trend-only projection instead of crashing the request.
+
+    Pulls two distinct signals at 15-minute resolution:
+      precipitation             -- mm expected, i.e. how hard it will rain
+      precipitation_probability -- percent chance, i.e. how likely at all
+    These are not interchangeable. An earlier version reported mm * 100 under
+    the name "rain_probability_pct", so 0.3mm of drizzle displayed as "30%".
+    """
     params = {
         "latitude": SILVERSTONE_LAT,
         "longitude": SILVERSTONE_LON,
-        "minutely_15": "precipitation",
+        "minutely_15": "precipitation,precipitation_probability",
         "forecast_days": 1,
     }
     try:
@@ -22,11 +39,20 @@ async def get_precipitation_forecast(minutes_ahead: int = 15) -> Dict:
             resp = await client.get(OPEN_METEO_URL, params=params)
             resp.raise_for_status()
             data = resp.json()
-        precip = data.get("minutely_15", {}).get("precipitation", [])
+        block = data.get("minutely_15", {})
         steps = max(minutes_ahead // 15, 1)
-        return {"available": True, "precipitation_mm": precip[:steps]}
+        return {
+            "available": True,
+            "precipitation_mm": (block.get("precipitation") or [])[:steps],
+            "precipitation_probability_pct": (block.get("precipitation_probability") or [])[:steps],
+        }
     except Exception:
-        return {"available": False, "precipitation_mm": []}
+        return {"available": False, "precipitation_mm": [], "precipitation_probability_pct": []}
+
+
+def _mean(values: List[float]) -> float:
+    usable = [v for v in values if v is not None]
+    return sum(usable) / len(usable) if usable else 0.0
 
 
 def project_condition(
@@ -35,12 +61,29 @@ def project_condition(
     precipitation_mm: List[float],
     num_laps: int,
     avg_lap_time_sec: float,
+    precipitation_probability_pct: List[float] = None,
 ) -> Dict:
     """Blend the visually-measured trend with the forecast direction. This
     is a transparent weighted extrapolation, not a trained model -- keep it
-    that way, it's explainable and that's the point."""
-    rain_signal = sum(precipitation_mm) / len(precipitation_mm) if precipitation_mm else 0.0
-    lap_adjustment = 0.05 if rain_signal > 0.1 else -0.01
+    that way, it's explainable and that's the point.
+
+    Three-way branch so "raining now", "probably about to rain" and "dry" are
+    distinguishable; previously anything short of measurable rain collapsed
+    into the same drying assumption.
+    """
+    rain_mm = _mean(precipitation_mm)
+    rain_prob = _mean(precipitation_probability_pct or [])
+
+    if rain_mm > RAIN_FALLING_MM:
+        lap_adjustment = RAIN_FALLING_ADJUSTMENT
+        rationale = f"{rain_mm:.2f}mm forecast in the window -- track wetting up."
+    elif rain_prob >= RAIN_LIKELY_PCT:
+        lap_adjustment = RAIN_LIKELY_ADJUSTMENT
+        rationale = f"{rain_prob:.0f}% chance of rain but none falling yet -- leaning wet."
+    else:
+        lap_adjustment = DRYING_ADJUSTMENT
+        rationale = "No meaningful rain signal -- assuming the track keeps drying."
+
     adjusted_slope = recent_slope + lap_adjustment
 
     projected = []
@@ -52,6 +95,11 @@ def project_condition(
     return {
         "horizon_laps": list(range(1, num_laps + 1)),
         "projected_wetness": projected,
-        "rain_probability_pct": round(min(rain_signal * 100, 100), 1),
+        # A real probability from the API, not mm rescaled. Keep it that way.
+        "rain_probability_pct": round(rain_prob, 1),
+        "precipitation_mm": round(rain_mm, 2),
+        "measured_slope": round(recent_slope, 4),
+        "weather_adjustment": lap_adjustment,
+        "forecast_rationale": rationale,
         "avg_lap_time_sec": avg_lap_time_sec,
     }

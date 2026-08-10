@@ -3,10 +3,12 @@ reference frames for eyeballing / labeling (not used at request time --
 runtime extraction is app/pipeline/frames.py).
 
 Usage:
-    pip install yt-dlp   # separate one-off install, not in the backend's deps
+    uv tool install yt-dlp   # separate one-off install, not in the backend's deps
     python scripts/fetch_footage.py <youtube_url> <clip_name>
+    python scripts/fetch_footage.py --slice <clip_name>   # already downloaded
 
 Saves to reference_footage/<clip_name>.mp4 and reference_footage/<clip_name>_frames/.
+Feed the frames folder to scripts/calibrate_vision.py --dir.
 """
 
 import os
@@ -41,6 +43,7 @@ def slice_frames(video_path: str, out_dir: str, fps: float = 1.0):
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("usage: python scripts/fetch_footage.py <youtube_url> <clip_name>")
+        print("       python scripts/fetch_footage.py --slice <clip_name>")
         sys.exit(1)
 
     url, name = sys.argv[1], sys.argv[2]
@@ -48,5 +51,6 @@ if __name__ == "__main__":
     os.makedirs(out_root, exist_ok=True)
     video_path = os.path.join(out_root, f"{name}.mp4")
 
-    download(url, video_path)
+    if url != "--slice":
+        download(url, video_path)
     slice_frames(video_path, os.path.join(out_root, f"{name}_frames"))

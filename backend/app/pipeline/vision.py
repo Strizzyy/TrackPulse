@@ -30,6 +30,16 @@ MODEL_NAME = "openai/clip-vit-base-patch32"
 # framing) was tested and measured *worse than random* even when cropped
 # (0.66 avg on known-dry frames) and was dropped rather than kept at a
 # lower ensemble weight.
+#
+# Now validated on real WET footage too (previously only a dry lap had been
+# measured, so high-wetness behaviour was pure assumption). Across four wet
+# Silverstone clips vs. the dry reference lap, 20 evenly-spaced frames each:
+#   dry reference lap (F1 halo cam):       0.171 avg  -- 15/17 below 0.35
+#   driver-POV wet lap (SR3, overcast):    0.727 avg  -- 14/18 above 0.65
+#   wet trackside short:                   0.766 avg
+#   wet trackside short (heavy spray):     0.744 avg
+# One clip (a vertical 9:16 trackside short) reads 0.539 and fails the 0.65
+# bar -- see the aspect-ratio caveat on WETNESS_CROP_BAND below.
 PROMPT_PAIRS = [
     (
         "an onboard camera view from inside a Formula 1 car, driving on a dry, "
@@ -43,13 +53,34 @@ PROMPT_PAIRS = [
     ),
 ]
 
-# Onboard halo cams keep the track surface in roughly the top third of the
-# frame, with the car/halo/driver dominating the rest -- cropping to that
-# strip before scoring is what actually made dry-vs-wet separable (see
-# above). Doesn't hold for every possible camera angle (trackside/aerial
-# shots would be cropping away real signal); acceptable trade for now
-# since onboard is what's actually been tested against real footage.
-WETNESS_CROP_FRAC = 0.35
+# Vertical band of the frame that actually contains track surface, as
+# (start, end) fractions of image height -- everything outside it is cropped
+# away before scoring.
+#
+# Halo-cam onboards (the original reference video) keep the tarmac in roughly
+# the top third, with the car/halo/driver dominating the rest -- cropping to
+# that strip is what made dry-vs-wet separable at all (see above).
+#
+# The obvious objection is that this can't generalise: in a driver-POV clip
+# the top third is sky and grandstands, with the tarmac lower down, so the
+# band looks like it should be measuring the weather rather than the surface.
+# Tested rather than assumed, via scripts/sweep_crop.py (dry reference lap vs.
+# the wet driver-POV lap, 12 frames each, separation = wet avg - dry avg):
+#   (0.00, 0.35)  dry 0.240  wet 0.732  sep +0.492   <-- current, best
+#   (0.00, 0.25)  dry 0.301  wet 0.635  sep +0.334   sky-only confound check
+#   (0.00, 0.50)  dry 0.338  wet 0.557  sep +0.219
+#   (0.40, 0.58)  dry 0.544  wet 0.425  sep -0.119   POV's actual tarmac band
+#   (0.00, 1.00)  dry 0.326  wet 0.360  sep +0.033   full frame
+# The top strip wins clearly, and beats the sky-only band, so it is not purely
+# reading cloud cover -- though the sky plainly contributes some of the signal.
+# The lower "real tarmac" bands score *negative* separation because they land
+# on the dark navy bodywork of the dry clip's car, which reads as wet: one
+# global band cannot align to the geometry of two different camera angles.
+#
+# Known limitation: on a vertical 9:16 short this band lands on grandstands
+# and fence, and a genuinely wet clip scored only 0.539. Landscape onboard or
+# trackside footage is the supported input; vertical phone video is not.
+WETNESS_CROP_BAND = (0.0, 0.35)
 
 # Filters out frames that aren't live racing footage at all -- title cards,
 # sponsor bumpers, and outro graphics get spliced into real YouTube clips
@@ -97,9 +128,10 @@ def _image_features(image: Image.Image) -> torch.Tensor:
     return feats / feats.norm(dim=-1, keepdim=True)
 
 
-def _crop_top(image: Image.Image, frac: float = WETNESS_CROP_FRAC) -> Image.Image:
+def _crop_band(image: Image.Image, band=WETNESS_CROP_BAND) -> Image.Image:
+    start, end = band
     w, h = image.size
-    return image.crop((0, 0, w, int(h * frac)))
+    return image.crop((0, int(h * start), w, int(h * end)))
 
 
 def _wetness_from_features(feats: torch.Tensor) -> float:
@@ -117,15 +149,18 @@ def _racing_confidence_from_features(feats: torch.Tensor) -> float:
     return float(probs[0].item())  # P(is live racing footage)
 
 
-def analyze_frame(image_path: str) -> Dict[str, float]:
+def analyze_frame(image_path: str, crop_band=None) -> Dict[str, float]:
     """Both signals for one frame in a single load: wetness score (cropped)
     and racing-footage confidence (full frame). The canonical entry point --
     used by both the request pipeline (main.py) and scripts/calibrate_vision.py
-    so there's one code path, not two that could drift apart."""
+    so there's one code path, not two that could drift apart.
+
+    crop_band overrides WETNESS_CROP_BAND for one call; only the calibration
+    scripts pass it, the request pipeline always uses the configured default."""
     load()
     image = Image.open(image_path).convert("RGB")
     with torch.no_grad():
-        wet_feats = _image_features(_crop_top(image))
+        wet_feats = _image_features(_crop_band(image, crop_band or WETNESS_CROP_BAND))
         racing_feats = _image_features(image)
         return {
             "wetness": _wetness_from_features(wet_feats),

@@ -10,18 +10,25 @@ from dotenv import load_dotenv
 # Load backend/.env (HF_TOKEN etc.) before anything reads os.environ.
 load_dotenv()
 
-from fastapi import FastAPI, File, HTTPException, UploadFile  # noqa: E402
+from typing import Optional  # noqa: E402
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 from app.agents import crew as strategist_crew  # noqa: E402
+from app.pipeline import circuits, history, optimizer, strategy, vision, weather  # noqa: E402
 from app.pipeline import frames as frames_module  # noqa: E402
-from app.pipeline import history, strategy, vision, weather  # noqa: E402
+from app.pipeline import session as session_module  # noqa: E402
 from app.pipeline import trend as trend_module  # noqa: E402
 
 BASE_DIR = os.path.dirname(__file__)
 UPLOAD_DIR = os.path.join(BASE_DIR, "..", "data", "uploads")
 TRACK_PATH = os.path.join(BASE_DIR, "data", "silverstone.json")
+
+# A multi-lap session needs more frames than a single lap. CLIP runs at roughly
+# 1s/frame on CPU, so this caps analysis latency at ~2 minutes.
+SESSION_MAX_FRAMES = 120
 
 
 @asynccontextmanager
@@ -75,7 +82,180 @@ def nearest_reference_frames(projected_wetness, horizon_laps, frames, sample_lap
 
 @app.get("/api/track/silverstone")
 def get_track():
+    """Original endpoint, unchanged. The frontend's existing lap flow depends
+    on it, so it stays even though /api/circuits/silverstone supersedes it."""
     return load_track()
+
+
+@app.get("/api/circuits")
+def list_circuits():
+    return {"circuits": circuits.available()}
+
+
+@app.get("/api/circuits/{circuit_id}")
+def get_circuit(circuit_id: str):
+    circuit = circuits.load(circuit_id)
+    if circuit is None:
+        raise HTTPException(404, f"No built data for circuit '{circuit_id}'. Run scripts/build_circuit_data.py.")
+    return circuit
+
+
+def _score_video(session_id: str, video: UploadFile, corners: list, lap_duration_sec: float):
+    """Shared vision pass: save upload -> extract frames -> CLIP score -> drop
+    non-racing -> map to corners. Used by the session and strategy endpoints;
+    /api/analyze keeps its own inlined copy so it cannot be broken from here."""
+    session_dir = os.path.join(UPLOAD_DIR, session_id)
+    os.makedirs(session_dir, exist_ok=True)
+
+    video_path = os.path.join(session_dir, "lap.mp4")
+    with open(video_path, "wb") as f:
+        shutil.copyfileobj(video.file, f)
+
+    frame_dir = os.path.join(session_dir, "frames")
+    extracted = frames_module.extract_frames(video_path, frame_dir, max_frames=SESSION_MAX_FRAMES)
+    analyses = vision.analyze_frames([f["path"] for f in extracted])
+
+    enriched = []
+    dropped = 0
+    for f, analysis in zip(extracted, analyses):
+        if analysis["is_racing"] < vision.RACING_THRESHOLD:
+            dropped += 1
+            continue
+        enriched.append(
+            {
+                "frame_index": f["frame_index"],
+                "timestamp_sec": f["timestamp_sec"],
+                "corner": trend_module.map_corner(f["timestamp_sec"], lap_duration_sec, corners),
+                "wetness_score": round(analysis["wetness"], 3),
+                "image_url": f"/media/{session_id}/frames/{f['filename']}",
+            }
+        )
+
+    if not enriched:
+        raise HTTPException(422, "No racing footage detected in this video -- got title cards/graphics only")
+    return enriched, dropped
+
+
+@app.post("/api/analyze-session")
+async def analyze_session(
+    video: UploadFile = File(...),
+    circuit_id: str = Form("silverstone"),
+    lap_duration_sec: Optional[float] = Form(None),
+    simulated: bool = Form(False),
+):
+    """Multi-lap analysis: a real trend over TIME rather than over track
+    position. See app/pipeline/session.py for why the single-lap slope was
+    measuring the wrong thing."""
+    circuit = circuits.load(circuit_id)
+    if circuit is None:
+        raise HTTPException(404, f"No built data for circuit '{circuit_id}'")
+
+    lap_duration = lap_duration_sec or circuit.get("avg_lap_time_sec") or 90.0
+    session_id = str(uuid.uuid4())
+    corner_defs = circuits.corners_for_mapping(circuit)
+
+    enriched, dropped = _score_video(session_id, video, corner_defs, lap_duration)
+    session_module.segment_laps(enriched, lap_duration)
+    lap_summaries = session_module.build_lap_summaries(enriched)
+    session_trend = session_module.compute_session_trend(lap_summaries)
+
+    for f in enriched:
+        f["label"] = trend_module.label_for_score(f["wetness_score"], session_trend["slope_per_lap"])
+
+    forecast_raw = await weather.get_precipitation_forecast(minutes_ahead=15)
+    forecast = weather.project_condition(
+        lap_summaries[-1]["avg_wetness"],
+        # Already per-lap -- no conversion needed here, unlike the single-lap path.
+        session_trend["slope_per_lap"],
+        forecast_raw["precipitation_mm"],
+        num_laps=10,
+        avg_lap_time_sec=lap_duration,
+        precipitation_probability_pct=forecast_raw.get("precipitation_probability_pct"),
+    )
+
+    sc_risk = history.get_sc_risk(
+        session_trend["slope_per_lap"], lap_summaries[-1]["avg_wetness"], circuit=circuit
+    )
+    recommendation = strategy.recommend(
+        lap_summaries[-1]["avg_wetness"], session_trend["direction"], session_trend["slope_per_lap"]
+    )
+
+    return {
+        "session_id": session_id,
+        "circuit_id": circuit_id,
+        "circuit_name": circuit.get("name"),
+        "simulated": simulated,
+        "lap_duration_sec": lap_duration,
+        "lap_count": len(lap_summaries),
+        "laps": lap_summaries,
+        "frames": enriched,
+        "dropped_non_racing_frames": dropped,
+        "trend": session_trend,
+        "forecast": forecast,
+        "safety_car_risk": sc_risk,
+        "recommendation": recommendation,
+    }
+
+
+@app.post("/api/strategy/plan")
+async def strategy_plan(
+    circuit_id: str = Form(...),
+    video: Optional[UploadFile] = File(None),
+    lap_duration_sec: Optional[float] = Form(None),
+    race_laps: Optional[int] = Form(None),
+):
+    """Full race strategy: enumerate pit plans, simulate each, rank by total
+    race time. If a lap video is supplied, the CLIP wetness read seeds the
+    projected track state so conditions actually move the recommendation --
+    that is where the vision pipeline plugs into the strategy layer."""
+    circuit = circuits.load(circuit_id)
+    if circuit is None:
+        raise HTTPException(404, f"No built data for circuit '{circuit_id}'")
+
+    total_laps = race_laps or circuit.get("race_laps") or 52
+    wetness_by_lap = None
+    conditions = {"source": "assumed dry -- no lap video supplied", "current_wetness": 0.0}
+
+    if video is not None:
+        lap_duration = lap_duration_sec or circuit.get("avg_lap_time_sec") or 90.0
+        session_id = str(uuid.uuid4())
+        enriched, _ = _score_video(
+            session_id, video, circuits.corners_for_mapping(circuit), lap_duration
+        )
+        session_module.segment_laps(enriched, lap_duration)
+        lap_summaries = session_module.build_lap_summaries(enriched)
+        session_trend = session_module.compute_session_trend(lap_summaries)
+        # start_lap=1: the uploaded footage's lap numbering is its own, not the
+        # race's. The measured condition is "now" = race lap 1, and the trend
+        # continues from there. Defaulting to the video's last lap number left
+        # the first several race laps pinned flat at the current value.
+        wetness_by_lap = session_module.wetness_projection(
+            lap_summaries, session_trend["slope_per_lap"], total_laps, start_lap=1
+        )
+        conditions = {
+            "source": "measured from uploaded footage (CLIP)",
+            "current_wetness": lap_summaries[-1]["avg_wetness"],
+            "direction": session_trend["direction"],
+            "slope_per_lap": session_trend["slope_per_lap"],
+            "laps_analyzed": session_trend["laps_analyzed"],
+            "session_id": session_id,
+        }
+
+    plan = optimizer.optimise(circuit, total_laps=total_laps, wetness_by_lap=wetness_by_lap)
+    return {
+        "circuit_id": circuit_id,
+        "circuit_name": circuit.get("name"),
+        "conditions": conditions,
+        "projected_wetness_by_lap": wetness_by_lap,
+        "strategy": plan,
+        "circuit_inputs": {
+            "avg_lap_time_sec": circuit.get("avg_lap_time_sec"),
+            "pit_loss_sec": circuit.get("pit_loss_sec"),
+            "degradation": circuit.get("degradation"),
+            "sc_or_vsc_rate_pct": circuit.get("sc_or_vsc_rate_pct"),
+            "source": circuit.get("source"),
+        },
+    }
 
 
 @app.post("/api/analyze")
@@ -128,12 +308,23 @@ async def analyze(video: UploadFile = File(...)):
     current = trend_module.current_condition_summary(enriched, trend_stats["recent_slope"])
 
     forecast_raw = await weather.get_precipitation_forecast(minutes_ahead=15)
+    # compute_trend() measures slope in wetness per SECOND, but
+    # project_condition() applies its slope once per LAP. Passing the raw value
+    # under-weighted the measured trend by roughly the lap length (~90x).
+    #
+    # Use the whole-lap fit, not recent_slope: recent_slope is fitted over a
+    # 15-second window (about five frames), and multiplying that up by a lap
+    # length amplifies its noise just as much as its signal -- it produced a
+    # +0.26/lap "trend" on a clip whose overall slope is flat. The full-lap fit
+    # is the most stable per-lap rate a single lap of footage can support.
+    slope_per_lap = trend_stats["slope"] * track["avg_lap_time_sec"]
     forecast = weather.project_condition(
         current["wetness_score"],
-        trend_stats["recent_slope"],
+        slope_per_lap,
         forecast_raw["precipitation_mm"],
         num_laps=10,
         avg_lap_time_sec=track["avg_lap_time_sec"],
+        precipitation_probability_pct=forecast_raw.get("precipitation_probability_pct"),
     )
 
     forecast["reference_frames"] = nearest_reference_frames(
@@ -159,9 +350,11 @@ async def analyze(video: UploadFile = File(...)):
             "projected_wetness": forecast["projected_wetness"],
             "sc_base_rate_pct": sc_risk["base_rate_pct"],
             "sc_risk_pct": sc_risk["risk_pct"],
+            "sc_timing_note": sc_risk.get("sc_timing_note"),
             "rule_based_call": recommendation["tire_call"],
             "compound": recommendation["compound"],
             "urgency": recommendation["urgency"],
+            "pit_window_laps": recommendation["pit_window_laps"],
         },
     )
 

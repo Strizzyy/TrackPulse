@@ -1,0 +1,131 @@
+{
+  "circuit_id": "monza",
+  "name": "Autodromo Nazionale Monza",
+  "lat": 45.6156,
+  "lon": 9.2811,
+  "source": "FastF1 race sessions 2019-2025",
+  "race_laps": 53,
+  "lap_distance_m": 5739.5,
+  "avg_lap_time_sec": 85.94,
+  "pit_loss_sec": 25.8,
+  "rain_frequency_pct": 0.0,
+  "degradation": {
+    "HARD": {
+      "s_per_lap": 0.0303,
+      "typical_stint_laps": 22,
+      "max_observed_stint_laps": 35,
+      "median_fit_r2": 0.452,
+      "samples": 100,
+      "s_per_lap_per_stint": 0.0419,
+      "races_in_panel": 7,
+      "method": "panel regression, track-evolution controlled"
+    },
+    "MEDIUM": {
+      "s_per_lap": 0.0282,
+      "typical_stint_laps": 19,
+      "max_observed_stint_laps": 27,
+      "median_fit_r2": 0.319,
+      "samples": 127,
+      "s_per_lap_per_stint": 0.0325,
+      "races_in_panel": 7,
+      "method": "panel regression, track-evolution controlled"
+    },
+    "SOFT": {
+      "s_per_lap": 0.0091,
+      "typical_stint_laps": 16,
+      "max_observed_stint_laps": 22,
+      "median_fit_r2": 0.392,
+      "samples": 47,
+      "s_per_lap_per_stint": 0.0389,
+      "races_in_panel": 5,
+      "method": "panel regression, track-evolution controlled"
+    }
+  },
+  "track_evolution_sec_per_lap": 0.0135,
+  "corners": [
+    {
+      "name": "Turn 1",
+      "number": 1,
+      "distance_m": 878.8,
+      "start_pct": 0.0,
+      "end_pct": 0.1585
+    },
+    {
+      "name": "Turn 2",
+      "number": 2,
+      "distance_m": 940.3,
+      "start_pct": 0.1585,
+      "end_pct": 0.2094
+    },
+    {
+      "name": "Turn 3",
+      "number": 3,
+      "distance_m": 1463.0,
+      "start_pct": 0.2094,
+      "end_pct": 0.31
+    },
+    {
+      "name": "Turn 4",
+      "number": 4,
+      "distance_m": 2095.2,
+      "start_pct": 0.31,
+      "end_pct": 0.37
+    },
+    {
+      "name": "Turn 5",
+      "number": 5,
+      "distance_m": 2151.7,
+      "start_pct": 0.37,
+      "end_pct": 0.4058
+    },
+    {
+      "name": "Turn 6",
+      "number": 6,
+      "distance_m": 2506.2,
+      "start_pct": 0.4058,
+      "end_pct": 0.465
+    },
+    {
+      "name": "Turn 7",
+      "number": 7,
+      "distance_m": 2831.7,
+      "start_pct": 0.465,
+      "end_pct": 0.5855
+    },
+    {
+      "name": "Turn 8",
+      "number": 8,
+      "distance_m": 3889.4,
+      "start_pct": 0.5855,
+      "end_pct": 0.6862
+    },
+    {
+      "name": "Turn 9",
+      "number": 9,
+      "distance_m": 3987.2,
+      "start_pct": 0.6862,
+      "end_pct": 0.7041
+    },
+    {
+      "name": "Turn 10",
+      "number": 10,
+      "distance_m": 4095.6,
+      "start_pct": 0.7041,
+      "end_pct": 0.8085
+    },
+    {
+      "name": "Turn 11",
+      "number": 11,
+      "distance_m": 5185.1,
+      "start_pct": 0.8085,
+      "end_pct": 1.0
+    }
+  ],
+  "corner_count": 11,
+  "corner_source": "fastf1_circuit_info",
+  "sessions_analyzed": 7,
+  "sc_or_vsc_rate_pct": 57.1,
+  "avg_first_deployment_lap": 19.3,
+  "degradation_confidence": "low",
+  "degradation_note": "Measured degradation is not monotonic across compounds (SOFT=0.0091, MEDIUM=0.0282, HARD=0.0303); reference values are used for simulation instead."
+}

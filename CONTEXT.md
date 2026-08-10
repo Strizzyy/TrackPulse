@@ -50,6 +50,34 @@ actually benefits from natural-language synthesis. If the LLM call fails or no
 -- the request never crashes because of the agent step (`agent_synthesis_used: false`
 in that case).
 
+### Race Weekend Strategist layer (added 11 Aug 2026)
+
+Alongside the single-lap flow above, TrackPulse now plans a full race across **five
+circuits** (Silverstone, Monaco, Spa, Monza, Suzuka), chosen for strategic variety:
+
+```
+offline, once:  FastF1 2019-2025 race sessions
+  -> real corner geometry (get_circuit_info, Distance in metres)
+  -> tyre degradation per compound (panel regression, track-evolution controlled)
+  -> pit loss, SC/VSC rate + first-deployment lap, rain frequency, race distance
+  -> app/data/circuits/{id}.json          [scripts/build_circuit_data.py]
+
+at request time (no FastF1 call, ever):
+  circuit JSON + optional lap video
+  -> CLIP wetness -> projected track state per race lap  [pipeline/session.py]
+  -> lap-time model: base + fuel + degradation + conditions  [pipeline/race_sim.py]
+  -> enumerate every 0-3 stop plan, rank by race time        [pipeline/optimizer.py]
+  -> ranked strategies + track-position caveat               [POST /api/strategy/plan]
+```
+
+The vision pipeline stays load-bearing: measured wetness decides which compounds are
+even considered (intermediates appear above 0.35) and shifts the recommended plan. At
+Spa, the same circuit returns `M29 / H37` assuming dry and `H32 / H34` when real wet
+footage is supplied.
+
+**Multi-lap session mode** (`POST /api/analyze-session`) fixes a conceptual flaw in the
+single-lap trend -- see "Trend over time" below.
+
 ## Repo structure
 
 ```
@@ -63,16 +91,27 @@ backend/
       weather.py           # Open-Meteo forecast + lap projection
       history.py           # reads cached FastF1 stats, computes SC risk
       strategy.py          # tire/pit-window rule engine
+      circuits.py          # loads app/data/circuits/*.json, cached; never calls FastF1
+      session.py           # multi-lap segmentation + trend over TIME (not track position)
+      fuel.py              # fuel load -> lap time; the one modelled strategy input
+      race_sim.py          # per-lap time model + whole-race simulation
+      optimizer.py         # enumerates 0-3 stop plans, ranks by simulated race time
     agents/
       crew.py              # Chief Strategist CrewAI agent (the one LLM call)
     data/
-      silverstone.json     # track metadata: corners, sector-time proportions, avg lap time
+      silverstone.json     # legacy hand-made track metadata; still served by /api/track/silverstone
       sc_stats.json         # real FastF1-derived Silverstone SC/VSC stats (not a placeholder)
+      circuits/*.json       # 5 circuits built from real FastF1 sessions -- the strategy inputs
   scripts/
-    fetch_sc_stats.py       # one-time FastF1 pull -> sc_stats.json (needs internet, run manually)
+    build_circuit_data.py   # ONE-TIME FastF1 pull -> app/data/circuits/*.json (slow; commit output)
+    validate_replay.py      # scores the optimiser against real race results
+    test_strategy.py        # sanity checks for fuel/race_sim/optimizer + circuit data
+    test_weather_branches.py# forces all three weather branches with stubbed forecasts
+    sweep_crop.py           # picks the vision crop band by dry/wet separation
+    fetch_sc_stats.py       # superseded by build_circuit_data.py; kept for reference
     fetch_footage.py        # yt-dlp helper for sourcing reference clips
     calibrate_vision.py     # loads already-extracted frames, tests vision.py scoring against them
-    smoke_test.py            # synthetic-video sanity check, no real footage needed
+    smoke_test.py            # BROKEN, see "Known broken" below
   .env.example              # copy to .env, add HF_TOKEN to activate the LLM agent
   pyproject.toml / uv.lock   # uv-managed, see Quickstart in README.md
 
@@ -118,12 +157,44 @@ contract.
     "horizon_laps": [1..10], "projected_wetness": [...], "rain_probability_pct": 0.0, "avg_lap_time_sec": 90.5,
     "reference_frames": [ { "lap": 1, "projected_wetness": 0.72, "reference_image_url": "...", "reference_label": "wet", "note": "closest real frame from this lap, not a real photo of a future lap" }, ... ]
   },
-  "safety_car_risk": { "risk_pct": 71.4, "base_rate_pct": 71.4, "rationale": "Historical SC/VSC rate at silverstone is 71.4%." },
+  "safety_car_risk": {
+    "risk_pct": 86.4, "base_rate_pct": 71.4, "sessions_analyzed": 7,
+    "rationale": "Historical SC/VSC rate at silverstone is 71.4%. Track currently wet, ...",
+    "expected_first_sc_lap": 14.6, "historical_first_sc_lap": 22.5, "sc_window_laps": [11, 18],
+    "sc_timing_note": "First SC/VSC historically comes around lap 22 here (avg of 7 sessions). With wet track, expect it earlier -- most likely laps 11-18."
+  },
   "recommendation": { "tire_call": "...", "compound": "intermediates", "urgency": "low", "pit_window_laps": [5, 8] },
   "strategist_note": "Hold on intermediates, conditions stable.",
   "agent_synthesis_used": true
 }
 ```
+
+### Race Weekend Strategist endpoints
+
+```
+GET  /api/circuits              -> [{ circuit_id, name, race_laps, avg_lap_time_sec,
+                                      pit_loss_sec, sc_or_vsc_rate_pct,
+                                      rain_frequency_pct, corner_count }, ...]
+GET  /api/circuits/{id}         -> full circuit record incl. real corners + degradation
+GET  /api/track/silverstone     -> UNCHANGED legacy endpoint, still used by the lap flow
+
+POST /api/analyze-session       (multipart: video, circuit_id, lap_duration_sec?, simulated?)
+  -> { lap_count, laps[{lap, avg_wetness, label, image_url, corners[]}],
+       trend{slope_per_lap, direction, summary}, forecast, safety_car_risk,
+       recommendation, simulated }
+
+POST /api/strategy/plan         (multipart: circuit_id, video?, race_laps?)
+  -> { conditions{source, current_wetness, direction, slope_per_lap},
+       projected_wetness_by_lap,
+       strategy{ recommended{plan, stints[], stops, total_time_display},
+                 best_per_stop_count[], ranked[], candidates_evaluated,
+                 wet_race, compounds_considered, track_position_caveat, note },
+       circuit_inputs{...} }
+```
+
+`/api/analyze` is deliberately untouched by all of this -- it stays the
+guaranteed-working demo path, and was verified byte-identical in behaviour afterwards
+(`pov_wet_full.mp4` -> `wet 0.718`, 16 corners, 56 frames).
 
 Frame images are served as static files under `/media/{session_id}/frames/{filename}` --
 always fetch them relative to the backend origin (`mediaUrl()` in `frontend/src/api.ts`
@@ -156,9 +227,79 @@ Fix, measured against that same known-dry video (`scripts/calibrate_vision.py`):
   last frame -- a single frame is noisy enough that using just one produced a "current
   condition" banner that visibly contradicted the corner-by-corner breakdown.
 
-Current calibration is based on **one** real reference video (a dry Silverstone
-qualifying-style onboard lap). It is not validated against real wet footage yet --
-that's the single highest-value thing the data teammate can do (see below).
+**Validated against real wet footage as of 10 Aug 2026.** Until then only the dry lap
+had been measured, so "wet reads as wet" was an assumption. Four wet Silverstone clips
+were sourced and scored against the dry reference lap, 20 evenly-spaced frames each:
+
+| clip                                | expected | avg wetness | result       |
+|-------------------------------------|----------|-------------|--------------|
+| dry reference lap (F1 halo cam)     | dry      | 0.171       | PASS (<0.35) |
+| driver-POV wet lap (SR3, overcast)  | wet      | 0.727       | PASS (>0.65) |
+| wet trackside short                 | wet      | 0.766       | PASS         |
+| wet trackside short (heavy spray)   | wet      | 0.744       | PASS         |
+| wet trackside short, vertical 9:16  | wet      | 0.539       | FAIL         |
+| damp track on slicks (10min, real)  | damp     | 0.609       | reads "drying", between dry and wet as intended |
+
+Dry-vs-wet separation is real and large (~0.55) on landscape footage. The one failure
+is a vertical 9:16 phone short, where the top-35% crop lands on grandstands rather than
+track. Vertical video is out of scope -- don't demo with it.
+
+The top-35% crop was also re-challenged on the driver-POV clip (where the top third is
+sky, not tarmac) with `scripts/sweep_crop.py` across 8 candidate bands. It still won by
+a wide margin and beat a sky-only band, so it is not merely reading cloud cover. The
+full sweep table is in the comments in `vision.py`.
+
+The mid-range now has real evidence too: a 10-minute damp-track-on-slicks clip reads
+0.609 and is labelled "drying", sitting cleanly between the dry lap's 0.171 and the wet
+lap's 0.727. So all three regimes are measured, not just the two extremes.
+
+Repro: `scripts/fetch_footage.py <url> <name>` to download and slice, then
+`uv run python scripts/calibrate_vision.py --dir reference_footage/<name>_frames --expect wet --limit 20`
+and `uv run python scripts/sweep_crop.py --dry <dry_frames> --wet <wet_frames> --limit 12`.
+
+## Trend over time: why single-lap slope was the wrong measurement
+
+`trend.compute_trend()` fits wetness against timestamp **within one ~90s lap**. Inside a
+single lap, time and track position are the same axis, so that slope measures "are the
+last corners wetter than the first", not "is the track drying". Every real clip returned
+`slope: -0.0`; only a synthetic ramp with a manufactured time axis produced one.
+
+`pipeline/session.py` buckets frames into laps and compares **lap averages**, which is an
+axis where time varies and position does not. On the same `damp_slicks.mp4` that the
+single-lap path reads as flat, session mode measures a real decline:
+
+```
+L1 0.580  L2 0.666  L3 0.634  L4 0.593  L5 0.556  L6 0.569  L7 0.544   -0.014/lap, drying
+```
+
+Two unit bugs were fixed along the way, both from mixing per-second and per-lap rates:
+- `project_condition()` applies its slope once per lap but was being handed a per-second
+  slope, under-weighting the measured trend ~90x. That is why the forecast curve looked
+  like it ignored the vision data.
+- The obvious correction (scale `recent_slope` up by the lap length) is wrong too:
+  `recent_slope` is fitted over a 15-second window of about five frames, so scaling it
+  amplifies its noise as much as its signal and produced a fictitious +0.26/lap trend.
+  The whole-lap fit is used instead.
+
+## Trend validation and the rule-engine fix (10 Aug 2026)
+
+Every real clip so far scores a roughly flat slope, so `trend.py`'s slope maths, the
+forecast blend, and the urgency branches in `strategy.py` had never actually run on a
+changing signal. No downloadable real drying lap was found (the obvious candidate, an
+ELMS dry-to-wet clip, is DRM protected and was not pursued further).
+
+Instead `reference_footage/synthetic_drying.mp4` was built from real frames -- wet POV
+frames, then a mixed section, then dry-reference frames -- giving a guaranteed falling
+ramp. **This is a control, not evidence**: it does not show CLIP handles a genuinely
+drying surface, because true intermediate states are absent and the camera angle changes
+mid-clip. What it does is exercise the downstream code, which had never been exercised.
+
+It worked (slope -0.026, direction "drying", corners grading 0.82 wet -> 0.11 dry) and it
+surfaced a real bug: the final branch of `strategy.recommend()` ignored `direction`
+entirely, so a drying track returned "Track is dry, no tire change needed" -- and, worse,
+so did a *dry track with rain arriving*. `strategy.py` now consults direction inside all
+three score bands; the dangerous silent case (dry + wetting) returns a high-urgency
+"rain arriving, be ready to box".
 
 ## What's real vs. not built
 
@@ -168,6 +309,11 @@ that's the single highest-value thing the data teammate can do (see below).
 - Safety-car historical stats (real FastF1 pull for Silverstone: 7 sessions analyzed,
   71.4% SC/VSC rate, avg first-deployment lap 22.5 -- `scripts/fetch_sc_stats.py`,
   re-runnable, needs internet)
+- Safety-car *timing* prediction: `avg_first_deployment_lap` was already in
+  `sc_stats.json` and read by nothing. `history.py` now projects a first-deployment lap
+  and window from it, pulled earlier by stated multipliers when the track is wet/damp or
+  worsening (e.g. wet -> lap 14.6, window 11-18, vs. the dry historical lap 22.5). The
+  multipliers are declared constants, not a fitted model, so they can be argued with.
 - CrewAI Chief Strategist LLM agent (Hugging Face Inference Providers; needs `HF_TOKEN`
   in `backend/.env` with "Make calls to Inference Providers" permission enabled on the
   token, or it gracefully falls back to rule-based text)
@@ -181,6 +327,53 @@ that's the single highest-value thing the data teammate can do (see below).
 - **Multi-track support.** Silverstone only, by deliberate scope choice.
 - Corner/sector percentages in `silverstone.json` are **rough estimates**, not
   surveyed sector-time data -- see the `note` field in that file.
+
+**Race strategy layer -- what is measured vs. modelled.** This distinction matters and
+is surfaced in the API response, not just here:
+
+| input | status |
+|---|---|
+| Corner geometry (all 5 circuits) | **real** -- FastF1 `get_circuit_info`, corner Distance in metres. Counts check out: Monaco 19, Monza 11, Suzuka 18, Silverstone 18 |
+| Pit loss | **real** -- 20.5s Monaco to 25.8s Monza, from in/out laps vs each driver's own green-lap median, safety-car stops excluded |
+| SC/VSC rate + first-deployment lap | **real** -- per circuit, 7 seasons |
+| Rain frequency | **real** -- `session.weather_data`, 0% at Monza to 42.9% at Silverstone |
+| Race distance, base lap time | **real** |
+| Tyre degradation | **measured but NOT trusted** -- see below |
+| Fuel effect | **modelled** -- declared constants in `pipeline/fuel.py` |
+| Race time / optimal strategy | **modelled** -- transparent arithmetic in `race_sim.py` |
+
+**Degradation is the honest failure here.** Three methods were tried: per-stint
+regression, a panel regression controlling for track evolution with driver fixed
+effects, and the same restricted to a matched tyre-age window. All three produce
+non-monotonic results at all five circuits (a harder tyre appearing to wear faster than
+a softer one), because real stint data conflates wear with track evolution, traffic, and
+teams choosing compounds *because* of the stint they plan to run. Rather than quietly
+bending real measurements towards an assumption, `build_circuit_data.py` flags the
+circuit `degradation_confidence: "low"` and `race_sim.py` falls back to reference
+degradation. The measured numbers stay in the JSON and in the API response so the
+disagreement is visible. **Do not claim measured per-circuit degradation is driving the
+simulation -- it currently is not.**
+
+**Validation against real races** (`scripts/validate_replay.py`) -- the optimiser scored
+against what winning teams actually did in 2023, excluding races it does not model
+(wet races, red flags):
+
+| circuit | predicted | actual (winner) | stops | compounds | race-time error |
+|---|---|---|---|---|---|
+| Monza | M23 / H28 | M20 / H31 | match | match | +2.3% |
+| Silverstone | M23 / H29 | M33 / S19 | match | differ | -2.7% |
+| Spa | M29 / H37 | M26 / H26 / S14 | 1 vs 2 | differ | +7.0% |
+| Suzuka | H29 / M24 | M16 / M21 / H16 | 1 vs 3 | match | -6.3% |
+
+Stop count correct 2/4, compound set correct 2/4, **mean race-time error 4.6%**. Monaco
+2023 excluded (wet). That is a genuine, unflattering result and the right one to quote:
+the simulator is close on race time and roughly half-right on stop strategy.
+
+**Known broken:**
+- `scripts/smoke_test.py` no longer passes. It feeds the pipeline synthetic solid-colour
+  frames, which the non-racing filter added later correctly rejects with a 422. The
+  "sanity check with no real footage needed" hasn't worked since that filter landed.
+  Either give it real frames or have it bypass the filter. Use a real clip meanwhile.
 
 ## For the frontend teammate
 
@@ -207,25 +400,35 @@ updating to match.
 
 ## For the data teammate
 
-Current state: one real reference video has been used to calibrate and validate the
-vision pipeline (a dry Silverstone onboard lap) -- see "Vision calibration" above.
-That's real but thin: it validates "dry reads as dry" but nothing has validated "wet
-reads as wet" yet.
+Current state: **wet validation is done** (10 Aug 2026) -- see the table under "Vision
+calibration" above. Five reference clips (one dry, four wet) live in
+`backend/reference_footage/`, gitignored, re-downloadable with `scripts/fetch_footage.py`.
+Both directions of the classifier are now measured rather than assumed.
+
+Tooling added for that work, reusable for any future clip:
+- `scripts/calibrate_vision.py --dir <folder> --expect dry|wet --limit N` -- scores any
+  frame folder through the real `vision.py` code path and prints avg/min/max plus an
+  explicit PASS/FAIL against the 0.35 / 0.65 thresholds. Still accepts a bare
+  `<session_id>` for frames under `backend/data/uploads/`.
+- `scripts/sweep_crop.py --dry <folder> --wet <folder>` -- scores a known-dry and a
+  known-wet folder under 8 candidate crop bands and reports which band *separates* them
+  best. Separation is the metric that matters: a band that reads everything as dry looks
+  great on dry footage and is worthless.
+- `scripts/fetch_footage.py --slice <name>` skips the download for a clip you already have.
 
 Highest-value next things, roughly in order:
-1. **Source a real wet-session clip** (search terms like "Silverstone wet race
-   onboard," "Silverstone rain FP onboard lap") and run it through
-   `scripts/calibrate_vision.py` (point it at a session's frame folder under
-   `backend/data/uploads/{session_id}/frames/`, or extract frames from a new clip
-   first) to check whether genuinely wet frames actually score high. If they don't,
-   the prompts/crop in `vision.py` need another calibration pass the same way the dry
-   case was: measure, don't guess.
-2. **Refine `silverstone.json`'s corner `start_pct`/`end_pct` values** using real
+1. **Refine `silverstone.json`'s corner `start_pct`/`end_pct` values** using real
    sector-time data if findable -- current values are rough visual estimates, flagged
    as such in the file's own `note` field. The backend reads this file generically, so
-   no code changes are needed when better numbers land.
-3. `scripts/fetch_footage.py` is a small yt-dlp + frame-slicing helper already written
-   for this (needs `pip install yt-dlp` separately, not part of the backend's deps).
+   no code changes are needed when better numbers land. This is now the top data task.
+2. **Pick and rehearse the demo clip.** The driver-POV wet lap is the strongest
+   candidate: it is a genuine full lap (so timestamp -> corner mapping is meaningful)
+   and it reads 0.727 wet against the dry lap's 0.171. The three wet shorts are useful
+   as calibration frames but are *not* full laps, so corner mapping on them is
+   meaningless -- do not upload them in the demo.
+3. Optional: a wet clip filmed from an F1 halo cam (same geometry as the dry reference)
+   would be the cleanest possible A/B, since the current wet/dry pair differs in camera
+   angle as well as conditions. Nice-to-have, not a blocker.
 
 ## Running the whole thing locally
 

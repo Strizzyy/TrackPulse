@@ -7,8 +7,14 @@ MAX_FRAMES = 60
 TARGET_FPS = 1.0
 
 
-def extract_frames(video_path: str, output_dir: str) -> List[Dict]:
-    """Slice a lap video into ~1fps frames, capped at MAX_FRAMES total."""
+def extract_frames(video_path: str, output_dir: str, max_frames: int = MAX_FRAMES) -> List[Dict]:
+    """Slice a lap video into ~1fps frames, capped at max_frames total.
+
+    The cap is a parameter because a multi-lap session video needs denser
+    coverage than a single lap -- 60 frames spread over ten minutes would be
+    roughly six per lap. Defaults to MAX_FRAMES so the single-lap path is
+    unchanged.
+    """
     os.makedirs(output_dir, exist_ok=True)
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -21,7 +27,7 @@ def extract_frames(video_path: str, output_dir: str) -> List[Dict]:
     if duration_sec <= 0:
         frame_interval = max(int(video_fps), 1)
     else:
-        wanted = max(min(int(duration_sec * TARGET_FPS), MAX_FRAMES), 1)
+        wanted = max(min(int(duration_sec * TARGET_FPS), max_frames), 1)
         frame_interval = max(total_frames // wanted, 1)
 
     frames: List[Dict] = []
@@ -45,7 +51,7 @@ def extract_frames(video_path: str, output_dir: str) -> List[Dict]:
                 }
             )
             saved_idx += 1
-            if saved_idx >= MAX_FRAMES:
+            if saved_idx >= max_frames:
                 break
         frame_idx += 1
 
