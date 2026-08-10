@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   analyzeLap,
   analyzeSession,
@@ -19,7 +19,17 @@ import CornerStrip from "./components/CornerStrip";
 import RecommendationPanel from "./components/RecommendationPanel";
 import StrategyBoard from "./components/StrategyBoard";
 import LapTrend from "./components/LapTrend";
-import { colorForLabel } from "./labelColors";
+import Panel from "./components/Panel";
+import { chipStyleForLabel } from "./labelColors";
+
+function DataRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between border-b border-carbon-800 py-2 last:border-b-0">
+      <span className="text-xs uppercase tracking-wider text-neutral-500">{label}</span>
+      <span className="font-mono text-sm tabular-nums text-neutral-200">{value}</span>
+    </div>
+  );
+}
 
 type Mode = "lap" | "session" | "strategy";
 
@@ -31,10 +41,15 @@ const MODE_LABELS: Record<Mode, string> = {
 
 const MODE_BLURBS: Record<Mode, string> = {
   lap: "Condition, corner map and tyre call from one lap of footage.",
-  session:
-    "Wetness compared lap over lap -- a trend over time, not over track position.",
+  session: "Wetness compared lap over lap — a trend over time, not over track position.",
   strategy:
-    "Simulate every pit plan over a real race distance. Upload footage to factor live conditions in.",
+    "Simulate every pit plan over a real race distance. Load footage to factor live conditions in.",
+};
+
+const UPLOAD_LABELS: Record<Mode, string> = {
+  lap: "Load lap video",
+  session: "Load session video",
+  strategy: "Load footage for conditions",
 };
 
 function App() {
@@ -49,6 +64,7 @@ function App() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     getTrack()
@@ -81,6 +97,8 @@ function App() {
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    // Reset the input so re-picking the same file fires onChange again.
+    e.target.value = "";
     if (!file) return;
     clearResults();
     await run(async () => {
@@ -96,214 +114,313 @@ function App() {
   }
 
   const selected = circuits.find((c) => c.circuit_id === circuitId);
+  const nothingLoaded = !report && !session && !strategy && !loading;
 
   return (
-    <div className="min-h-screen bg-gray-100 text-gray-900">
-      <header className="bg-gray-900 text-white px-6 py-4">
-        <h1 className="text-xl font-bold">TrackPulse</h1>
-        <p className="text-sm text-gray-400">
-          Pit wall copilot - {track ? track.name : "loading..."}
-        </p>
+    <div className="min-h-screen bg-carbon-900 text-neutral-200">
+      <header className="border-b border-carbon-700 bg-carbon-950">
+        <div className="h-1 bg-f1-red" />
+        <div className="flex items-center justify-between px-4 py-3">
+          <div className="flex items-baseline gap-3">
+            <h1 className="text-2xl font-black italic uppercase tracking-tight text-white">
+              Track<span className="text-f1-red">Pulse</span>
+            </h1>
+            <span className="hidden text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 sm:inline">
+              {selected ? selected.name : track ? track.name : "Loading track..."}
+            </span>
+          </div>
+          <div className="text-right">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.3em] text-neutral-500">
+              Mode
+            </div>
+            <div className="text-sm font-bold uppercase tracking-wider text-white">
+              {MODE_LABELS[mode]}
+            </div>
+          </div>
+        </div>
       </header>
 
-      <main className="max-w-4xl mx-auto p-6 flex flex-col gap-6">
-        <section className="rounded-lg border border-gray-300 bg-white p-6">
-          <div className="flex flex-wrap gap-2">
-            {(Object.keys(MODE_LABELS) as Mode[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => {
-                  setMode(m);
-                  clearResults();
-                }}
-                className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-                  mode === m
-                    ? "bg-gray-900 text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-              >
-                {MODE_LABELS[m]}
-              </button>
-            ))}
-          </div>
-          <p className="mt-2 text-xs text-gray-500">{MODE_BLURBS[mode]}</p>
+      {/* toolbar */}
+      <div className="border-b border-carbon-700 bg-carbon-850">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-2 px-4 py-2">
+          {(Object.keys(MODE_LABELS) as Mode[]).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => {
+                setMode(m);
+                clearResults();
+              }}
+              className={`rounded-sm px-3 py-1.5 text-xs font-bold uppercase tracking-[0.15em] transition-colors ${
+                mode === m
+                  ? "bg-f1-red text-white"
+                  : "border border-carbon-600 bg-carbon-800 text-neutral-400 hover:text-neutral-200"
+              }`}
+            >
+              {MODE_LABELS[m]}
+            </button>
+          ))}
 
-          {mode !== "lap" && circuits.length > 0 && (
-            <div className="mt-4">
-              <div className="mb-2 text-xs uppercase tracking-wide text-gray-500">Circuit</div>
-              <div className="flex flex-wrap gap-2">
-                {circuits.map((c) => (
-                  <button
-                    key={c.circuit_id}
-                    onClick={() => {
-                      setCircuitId(c.circuit_id);
-                      clearResults();
-                    }}
-                    className={`rounded border px-3 py-1.5 text-sm transition-colors ${
-                      circuitId === c.circuit_id
-                        ? "border-gray-900 bg-gray-900 text-white"
-                        : "border-gray-300 bg-white text-gray-700 hover:border-gray-400"
-                    }`}
-                  >
-                    {c.name.replace(/^(Circuit de |Autodromo Nazionale )/, "")}
-                  </button>
-                ))}
-              </div>
-              {selected && (
-                <p className="mt-2 text-xs text-gray-500">
-                  {selected.race_laps} laps - {selected.corner_count} corners - pit loss{" "}
-                  {selected.pit_loss_sec}s - SC/VSC {selected.sc_or_vsc_rate_pct}% - rain{" "}
-                  {selected.rain_frequency_pct}% of races. All measured from real FastF1 sessions.
-                </p>
-              )}
-            </div>
-          )}
+          <span className="ml-auto" />
 
-          <label className="mt-4 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gray-300 p-8 transition-colors hover:border-gray-400">
-            <span className="text-gray-600">
-              {loading
-                ? "Analyzing..."
-                : mode === "strategy"
-                  ? "Upload lap footage to factor in live conditions (mp4)"
-                  : "Click to upload a lap video (mp4)"}
-            </span>
-            <input
-              type="file"
-              accept="video/*"
-              className="hidden"
-              onChange={handleFile}
-              disabled={loading}
-            />
-          </label>
-
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={loading}
+            className="rounded-sm bg-f1-red px-4 py-2 text-sm font-bold uppercase tracking-[0.15em] text-white transition-colors hover:bg-f1-red-dark disabled:opacity-60"
+          >
+            {loading ? "Analyzing..." : UPLOAD_LABELS[mode]}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="video/*"
+            className="hidden"
+            onChange={handleFile}
+            disabled={loading}
+          />
           {mode === "strategy" && (
             <button
+              type="button"
               onClick={handleDryStrategy}
               disabled={loading}
-              className="mt-3 w-full rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-700 disabled:opacity-50"
+              className="rounded-sm border border-carbon-600 bg-carbon-800 px-4 py-2 text-sm font-bold uppercase tracking-[0.15em] text-neutral-300 transition-colors hover:text-white disabled:opacity-60"
             >
-              Plan a dry race without footage
+              Plan dry race
             </button>
           )}
+        </div>
 
-          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-        </section>
+        {/* circuit picker -- strategy and session are per-circuit, single lap is not */}
+        {mode !== "lap" && circuits.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-carbon-800 px-4 py-2">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.3em] text-neutral-500">
+              Circuit
+            </span>
+            {circuits.map((c) => (
+              <button
+                key={c.circuit_id}
+                type="button"
+                onClick={() => {
+                  setCircuitId(c.circuit_id);
+                  clearResults();
+                }}
+                className={`rounded-sm border px-2.5 py-1 text-xs font-bold uppercase tracking-wider transition-colors ${
+                  circuitId === c.circuit_id
+                    ? "border-f1-red bg-f1-red/10 text-red-300"
+                    : "border-carbon-600 bg-carbon-800 text-neutral-400 hover:text-neutral-200"
+                }`}
+              >
+                {c.name.replace(/^(Circuit de |Autodromo Nazionale |Suzuka )/, "")}
+              </button>
+            ))}
+            {selected && (
+              <span className="font-mono text-xs tabular-nums text-neutral-500">
+                {selected.race_laps} laps · {selected.corner_count} corners · pit loss{" "}
+                {selected.pit_loss_sec}s · SC/VSC {selected.sc_or_vsc_rate_pct}% · rain{" "}
+                {selected.rain_frequency_pct}% — all from real FastF1 sessions
+              </span>
+            )}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-x-4 px-4 pb-2">
+          <span className="text-xs uppercase tracking-wider text-neutral-500">
+            {MODE_BLURBS[mode]}
+          </span>
+          {loading && (
+            <span className="animate-pulse text-sm font-semibold uppercase tracking-[0.15em] text-f1-red">
+              Processing frames — CLIP scoring in progress
+            </span>
+          )}
+          {report && !loading && (
+            <span className="font-mono text-sm tabular-nums text-neutral-500">
+              {report.frames.length} frames analyzed · {report.dropped_non_racing_frames} non-racing
+              dropped · session {report.session_id.slice(0, 8)}
+            </span>
+          )}
+          {error && <span className="text-sm font-semibold text-f1-red">{error}</span>}
+        </div>
+      </div>
+
+      <main className="flex flex-col gap-3 p-4">
+        {nothingLoaded && (
+          <Panel title="Awaiting telemetry" bodyClassName="p-0">
+            <button
+              type="button"
+              onClick={() =>
+                mode === "strategy" ? handleDryStrategy() : fileInputRef.current?.click()
+              }
+              className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 p-12 transition-colors hover:bg-carbon-800"
+            >
+              <span className="text-base font-bold uppercase tracking-[0.2em] text-neutral-200">
+                {mode === "strategy"
+                  ? "Plan a race, or load footage for live conditions"
+                  : "Load a lap video to begin"}
+              </span>
+              <span className="text-sm uppercase tracking-widest text-neutral-500">
+                {mode === "strategy"
+                  ? "Real degradation · pit loss · safety car history · every stop plan simulated"
+                  : "MP4 onboard footage · condition trend · forecast · pit call"}
+              </span>
+            </button>
+          </Panel>
+        )}
 
         {strategy && <StrategyBoard report={strategy} />}
 
         {session && (
           <>
             {session.simulated && (
-              <div className="rounded-lg border-2 border-amber-400 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
-                SIMULATED SESSION - this footage was constructed for rehearsal, not recorded at a
-                real session.
+              <div className="rounded-sm border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm font-bold uppercase tracking-wider text-amber-300">
+                Simulated session — this footage was constructed for rehearsal, not recorded at a
+                real session
               </div>
             )}
-            <section className="rounded-lg border border-gray-300 bg-white p-6">
-              <div className="text-xs uppercase tracking-wide text-gray-500">
-                Wetness per lap - {session.circuit_name}
-              </div>
-              <p className="mb-3 mt-1 text-sm text-gray-700">{session.trend.summary}</p>
+            <Panel
+              title={`Wetness per lap — ${session.circuit_name}`}
+              right={
+                <span className="font-mono text-xs tabular-nums text-neutral-500">
+                  {session.lap_count} laps · {session.frames.length} frames ·{" "}
+                  {session.dropped_non_racing_frames} dropped · {session.lap_duration_sec}s/lap
+                </span>
+              }
+            >
+              <p className="mb-3 text-sm text-neutral-400">{session.trend.summary}</p>
               <LapTrend report={session} />
-              <p className="mt-3 text-xs text-gray-500">
-                {session.lap_count} laps from {session.frames.length} frames (
-                {session.dropped_non_racing_frames} dropped as non-racing), split at{" "}
-                {session.lap_duration_sec}s per lap.
-              </p>
-            </section>
-            <section>
-              <RecommendationPanel
-                recommendation={session.recommendation}
-                safetyCarRisk={session.safety_car_risk}
-                strategistNote={session.recommendation.tire_call}
-                agentSynthesisUsed={false}
-              />
-            </section>
+            </Panel>
+            <RecommendationPanel
+              recommendation={session.recommendation}
+              safetyCarRisk={session.safety_car_risk}
+              strategistNote={session.recommendation.tire_call}
+              agentSynthesisUsed={false}
+            />
           </>
         )}
 
         {report && (
           <>
-            <section className="rounded-lg border border-gray-300 bg-white p-6">
-              <div className="text-xs uppercase tracking-wide text-gray-500">Current condition</div>
-              <div className="mt-2 flex items-center gap-4">
-                <img
-                  src={mediaUrl(report.current_condition.image_url)}
-                  alt="Most recent frame"
-                  className="w-40 h-28 object-cover rounded-md border border-gray-200"
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
+              <Panel title="Session data" className="lg:col-span-3" bodyClassName="px-4 py-2">
+                <DataRow
+                  label="Condition"
+                  value={
+                    <span
+                      className="rounded-xs px-2 py-0.5 text-xs font-bold uppercase"
+                      style={chipStyleForLabel(report.current_condition.label)}
+                    >
+                      {report.current_condition.label}
+                    </span>
+                  }
                 />
-                <div>
+                <DataRow
+                  label="Wetness score"
+                  value={report.current_condition.wetness_score.toFixed(2)}
+                />
+                <DataRow label="Trend" value={report.trend.direction} />
+                <DataRow label="Trend slope" value={report.trend.slope.toFixed(4)} />
+                <DataRow
+                  label="Rain probability"
+                  value={`${report.forecast.rain_probability_pct}%`}
+                />
+                <DataRow label="Avg lap time" value={`${report.forecast.avg_lap_time_sec}s`} />
+                <DataRow label="Frames analyzed" value={report.frames.length} />
+                <DataRow label="Frames dropped" value={report.dropped_non_racing_frames} />
+              </Panel>
+
+              <Panel
+                title="Corner analysis"
+                className="lg:col-span-5"
+                bodyClassName="max-h-96 overflow-y-auto p-0"
+              >
+                <CornerStrip corners={report.corners} />
+              </Panel>
+
+              <Panel title="Latest frame" className="lg:col-span-4" bodyClassName="p-0">
+                <div className="relative">
+                  <img
+                    src={mediaUrl(report.current_condition.image_url)}
+                    alt="Most recent racing frame"
+                    className="aspect-video w-full object-cover"
+                  />
                   <span
-                    className="inline-block rounded px-2 py-1 text-white text-sm font-medium"
-                    style={{ backgroundColor: colorForLabel(report.current_condition.label) }}
+                    className="absolute left-2 top-2 rounded-xs px-2 py-0.5 text-xs font-bold uppercase backdrop-blur-sm"
+                    style={chipStyleForLabel(report.current_condition.label)}
                   >
                     {report.current_condition.label}
                   </span>
-                  <p className="mt-2 text-sm text-gray-600">{report.trend.summary}</p>
-                  <p className="text-xs text-gray-400">
-                    wetness score: {report.current_condition.wetness_score.toFixed(2)} - rain chance:{" "}
-                    {report.forecast.rain_probability_pct}% ({report.forecast.precipitation_mm}mm)
-                  </p>
+                  <span className="absolute bottom-2 right-2 rounded-xs bg-black/70 px-2 py-0.5 font-mono text-xs tabular-nums text-white">
+                    T+{report.current_condition.timestamp_sec.toFixed(1)}s
+                  </span>
+                </div>
+                <p className="border-t border-carbon-700 px-4 py-2.5 text-sm text-neutral-400">
+                  {report.trend.summary}
+                </p>
+              </Panel>
+            </div>
+
+            <Panel title="Wetness trend + next-lap forecast" bodyClassName="p-4">
+              <div className="flex gap-3">
+                <div className="hidden w-24 shrink-0 pt-8 sm:block">
+                  <div className="text-sm font-bold text-neutral-200">Wetness</div>
+                  <div className="text-xs uppercase tracking-wider text-neutral-500">score 0–1</div>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <TrendChart frames={report.frames} forecast={report.forecast} />
                 </div>
               </div>
-            </section>
-
-            <section className="rounded-lg border border-gray-300 bg-white p-6">
-              <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">
-                Wetness trend + next-lap forecast
-              </div>
-              <TrendChart frames={report.frames} forecast={report.forecast} />
-              <p className="mt-2 text-xs text-gray-500">
+              {/* The projection is arithmetic, not a model -- show both terms. */}
+              <p className="mt-2 border-t border-carbon-800 pt-2 text-xs text-neutral-500">
                 {report.forecast.forecast_rationale} Projection = measured slope{" "}
                 {report.forecast.measured_slope >= 0 ? "+" : ""}
                 {report.forecast.measured_slope} + weather{" "}
                 {report.forecast.weather_adjustment >= 0 ? "+" : ""}
                 {report.forecast.weather_adjustment} per lap.
               </p>
-            </section>
+            </Panel>
 
-            <section className="rounded-lg border border-gray-300 bg-white p-6">
-              <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">Corners</div>
-              <CornerStrip corners={report.corners} />
-            </section>
-
-            <section className="rounded-lg border border-gray-300 bg-white p-6">
-              <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">Predicted condition</div>
-              <p className="text-xs text-gray-400 mb-3">
-                No one can photograph a future lap -- these are the closest real frames from THIS
-                lap to the projected wetness score, shown as a reference for what that condition
-                would look like, not a real photo of that future lap.
-              </p>
-              <div className="flex flex-wrap gap-3">
+            <Panel
+              title="Forecast references"
+              right={
+                <span className="text-xs uppercase tracking-wider text-neutral-500">
+                  Closest real frames from this lap — not photos of future laps
+                </span>
+              }
+              bodyClassName="p-4"
+            >
+              <div className="flex gap-3 overflow-x-auto">
                 {report.forecast.reference_frames.map((r) => (
-                  <div key={r.lap} className="w-32 overflow-hidden rounded-md border border-gray-200">
+                  <div
+                    key={r.lap}
+                    className="w-48 shrink-0 overflow-hidden rounded-sm border border-carbon-700 bg-carbon-900"
+                  >
                     <img
                       src={mediaUrl(r.reference_image_url)}
                       alt={`Reference for lap ${r.lap}`}
-                      className="h-20 w-full object-cover"
+                      className="h-28 w-full object-cover"
                     />
-                    <div
-                      className="flex flex-col items-center justify-center px-2 py-1 text-white text-xs"
-                      style={{ backgroundColor: colorForLabel(r.reference_label) }}
-                    >
-                      <span className="font-medium">Lap +{r.lap}</span>
-                      <span className="opacity-90">
-                        {r.reference_label} ({r.projected_wetness.toFixed(2)})
+                    <div className="flex items-center justify-between px-2.5 py-2 text-xs">
+                      <span className="font-mono font-bold tabular-nums text-neutral-200">
+                        LAP +{r.lap}
+                      </span>
+                      <span
+                        className="rounded-xs px-2 py-0.5 font-semibold uppercase"
+                        style={chipStyleForLabel(r.reference_label)}
+                      >
+                        {r.reference_label} {r.projected_wetness.toFixed(2)}
                       </span>
                     </div>
                   </div>
                 ))}
               </div>
-            </section>
+            </Panel>
 
-            <section>
-              <RecommendationPanel
-                recommendation={report.recommendation}
-                safetyCarRisk={report.safety_car_risk}
-                strategistNote={report.strategist_note}
-                agentSynthesisUsed={report.agent_synthesis_used}
-              />
-            </section>
+            <RecommendationPanel
+              recommendation={report.recommendation}
+              safetyCarRisk={report.safety_car_risk}
+              strategistNote={report.strategist_note}
+              agentSynthesisUsed={report.agent_synthesis_used}
+            />
           </>
         )}
       </main>

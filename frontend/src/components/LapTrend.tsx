@@ -9,7 +9,7 @@ import {
   YAxis,
 } from "recharts";
 import type { SessionReport } from "../types";
-import { colorForLabel } from "../labelColors";
+import { chipStyleForLabel, colorForLabel } from "../labelColors";
 import { mediaUrl } from "../api";
 
 interface Props {
@@ -34,15 +34,21 @@ export default function LapTrend({ report }: Props) {
       <div className="h-56 w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a35" vertical={false} />
             <XAxis
               dataKey="lap"
               stroke="#6b7280"
               fontSize={12}
-              tickFormatter={(v: number) => `Lap ${v}`}
+              tickFormatter={(v: number) => `L${v}`}
             />
             <YAxis domain={[0, 1]} stroke="#6b7280" fontSize={12} />
             <Tooltip
+              contentStyle={{
+                backgroundColor: "#15151e",
+                border: "1px solid #3a3a45",
+                borderRadius: 2,
+                color: "#e5e5e5",
+              }}
               formatter={(value, _name, entry) => [
                 `${Number(value).toFixed(3)} (${entry.payload.label})`,
                 "wetness",
@@ -60,17 +66,20 @@ export default function LapTrend({ report }: Props) {
 
       <div className="flex flex-wrap gap-2">
         {report.laps.map((lap) => (
-          <div key={lap.lap} className="w-24 overflow-hidden rounded border border-gray-200">
+          <div
+            key={lap.lap}
+            className="w-24 overflow-hidden rounded-sm border border-carbon-700 bg-carbon-900"
+          >
             <img
               src={mediaUrl(lap.image_url)}
               alt={`Lap ${lap.lap}`}
               className="h-14 w-full object-cover"
             />
             <div
-              className="px-1 py-0.5 text-center text-[11px] text-white"
-              style={{ backgroundColor: colorForLabel(lap.label) }}
+              className="px-1 py-0.5 text-center font-mono text-[11px] font-bold tabular-nums"
+              style={chipStyleForLabel(lap.label)}
             >
-              L{lap.lap} - {lap.avg_wetness.toFixed(2)}
+              L{lap.lap} · {lap.avg_wetness.toFixed(2)}
             </div>
           </div>
         ))}
