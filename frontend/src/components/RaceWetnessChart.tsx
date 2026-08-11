@@ -46,25 +46,25 @@ export default function RaceWetnessChart({ projected, recommended }: Props) {
         <AreaChart data={data} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
           <defs>
             <linearGradient id="wetFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.5} />
-              <stop offset="100%" stopColor="#38bdf8" stopOpacity={0.03} />
+              <stop offset="0%" stopColor="#00dbe7" stopOpacity={0.45} />
+              <stop offset="100%" stopColor="#00dbe7" stopOpacity={0.03} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#2a2a35" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke="#3a494b" vertical={false} />
           <XAxis
             dataKey="lap"
-            stroke="#6b7280"
+            stroke="#849495"
             fontSize={11}
             tickFormatter={(v: number) => `L${v}`}
             interval="preserveStartEnd"
           />
-          <YAxis domain={[0, 1]} stroke="#6b7280" fontSize={11} />
+          <YAxis domain={[0, 1]} stroke="#849495" fontSize={11} />
           <Tooltip
             contentStyle={{
-              backgroundColor: "#15151e",
-              border: "1px solid #3a3a45",
-              borderRadius: 2,
-              color: "#e5e5e5",
+              backgroundColor: "#0e0e10",
+              border: "1px solid #3a494b",
+              borderRadius: 4,
+              color: "#e5e1e4",
             }}
             formatter={(value) => [Number(value).toFixed(3), "projected wetness"]}
             labelFormatter={(v) => `Lap ${v}`}
@@ -72,31 +72,31 @@ export default function RaceWetnessChart({ projected, recommended }: Props) {
 
           <ReferenceLine
             y={WET_CUTOFF}
-            stroke="#38bdf8"
+            stroke="#ff525c"
             strokeDasharray="4 4"
-            label={{ value: "wet", position: "insideTopLeft", fill: "#38bdf8", fontSize: 10 }}
+            label={{ value: "wet", position: "insideTopLeft", fill: "#ff525c", fontSize: 10 }}
           />
           <ReferenceLine
             y={DRY_CUTOFF}
-            stroke="#f59e0b"
+            stroke="#00dbe7"
             strokeDasharray="4 4"
-            label={{ value: "dry", position: "insideBottomLeft", fill: "#f59e0b", fontSize: 10 }}
+            label={{ value: "dry", position: "insideBottomLeft", fill: "#00dbe7", fontSize: 10 }}
           />
 
           {stopLaps.map((stopLap) => (
             <ReferenceLine
               key={stopLap}
               x={stopLap}
-              stroke="#e10600"
+              stroke="#ff525c"
               strokeWidth={2}
-              label={{ value: `BOX L${stopLap}`, position: "top", fill: "#e10600", fontSize: 10 }}
+              label={{ value: `BOX L${stopLap}`, position: "top", fill: "#ff525c", fontSize: 10 }}
             />
           ))}
 
           <Area
             type="monotone"
             dataKey="wetness"
-            stroke="#38bdf8"
+            stroke="#00dbe7"
             strokeWidth={2}
             fill="url(#wetFill)"
           />

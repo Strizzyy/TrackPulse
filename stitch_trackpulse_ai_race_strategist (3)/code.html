@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Multi-Lap Session Analysis - Apex Control</title>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Anybody:wght@700;800;900&amp;family=Hanken+Grotesk:wght@400&amp;family=JetBrains+Mono:wght@500;600&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS & Config -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "secondary-container": "#ff525c",
+                        "on-surface-variant": "#b9cacb",
+                        "tertiary-fixed-dim": "#e8c423",
+                        "tertiary": "#fff6e4",
+                        "error": "#ffb4ab",
+                        "on-secondary-fixed-variant": "#92001e",
+                        "surface-container-highest": "#353437",
+                        "surface-container-high": "#2a2a2c",
+                        "tertiary-fixed": "#ffe173",
+                        "on-secondary-container": "#5b000f",
+                        "surface-container-low": "#1c1b1d",
+                        "on-tertiary-fixed-variant": "#554500",
+                        "background": "#131315",
+                        "inverse-surface": "#e5e1e4",
+                        "on-tertiary-fixed": "#221b00",
+                        "surface-dim": "#131315",
+                        "on-primary-fixed": "#002022",
+                        "outline-variant": "#3a494b",
+                        "primary": "#e1fdff",
+                        "on-tertiary": "#3b2f00",
+                        "on-secondary-fixed": "#410008",
+                        "on-error-container": "#ffdad6",
+                        "inverse-on-surface": "#313032",
+                        "tertiary-container": "#fed83a",
+                        "surface": "#131315",
+                        "surface-bright": "#39393b",
+                        "on-primary": "#00363a",
+                        "secondary": "#ffb3b2",
+                        "on-surface": "#e5e1e4",
+                        "surface-tint": "#00dbe7",
+                        "secondary-fixed-dim": "#ffb3b2",
+                        "on-error": "#690005",
+                        "on-primary-container": "#006a71",
+                        "error-container": "#93000a",
+                        "on-primary-fixed-variant": "#004f54",
+                        "primary-fixed": "#74f5ff",
+                        "surface-container-lowest": "#0e0e10",
+                        "primary-fixed-dim": "#00dbe7",
+                        "secondary-fixed": "#ffdad8",
+                        "surface-variant": "#353437",
+                        "on-secondary": "#680012",
+                        "outline": "#849495",
+                        "surface-container": "#201f21",
+                        "on-tertiary-container": "#725e00",
+                        "inverse-primary": "#00696f",
+                        "primary-container": "#00f2ff",
+                        "on-background": "#e5e1e4"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "container-padding": "12px",
+                        "unit": "4px",
+                        "data-row-height": "32px",
+                        "margin": "24px",
+                        "gutter": "16px"
+                    },
+                    "fontFamily": {
+                        "headline-lg-mobile": ["Anybody"],
+                        "headline-lg": ["Anybody"],
+                        "body-md": ["Hanken Grotesk"],
+                        "headline-xl": ["Anybody"],
+                        "call-to-action": ["Anybody"],
+                        "telemetry-data": ["JetBrains Mono"],
+                        "label-xs": ["JetBrains Mono"]
+                    },
+                    "fontSize": {
+                        "headline-lg-mobile": ["24px", { "lineHeight": "1.2", "fontWeight": "700" }],
+                        "headline-lg": ["32px", { "lineHeight": "1.2", "fontWeight": "700" }],
+                        "body-md": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "headline-xl": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "800" }],
+                        "call-to-action": ["18px", { "lineHeight": "1.4", "fontWeight": "700" }],
+                        "telemetry-data": ["14px", { "lineHeight": "1", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "label-xs": ["11px", { "lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "500" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { background-color: #0e0e10; color: #e5e1e4; }
+        .glass-panel {
+            background: #1c1b1d;
+            border: 1px solid #353437;
+        }
+        .corner-bracket {
+            position: relative;
+        }
+        .corner-bracket::before, .corner-bracket::after {
+            content: ''; position: absolute; width: 8px; height: 8px; border: 1px solid #00dbe7;
+        }
+        .corner-bracket::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+        .corner-bracket::after { bottom: -1px; right: -1px; border-left: none; border-top: none; }
+        
+        /* Custom Scrollbar for dark theme */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0e0e10; }
+        ::-webkit-scrollbar-thumb { background: #353437; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #00dbe7; }
+    </style>
+</head>
+<body class="antialiased min-h-screen overflow-x-hidden font-body-md text-body-md selection:bg-primary-fixed-dim selection:text-on-primary">
+<!-- TopNavBar -->
+<header class="bg-surface-container-lowest fixed top-0 w-full border-b border-surface-container-highest flex justify-between items-center px-margin h-16 z-50">
+<div class="flex items-center gap-gutter">
+<span class="font-headline-lg text-headline-lg font-black text-on-surface uppercase tracking-tighter">TRACK<span class="text-secondary-container">PULSE</span></span>
+<nav class="hidden md:flex gap-unit ml-margin border-l border-surface-container-highest pl-gutter items-center">
+<span class="text-outline font-label-xs text-label-xs mr-2 tracking-widest">CIRCUIT</span>
+<a class="text-on-surface-variant font-label-xs text-label-xs hover:text-primary transition-colors px-3 py-1 rounded border border-surface-container-highest uppercase" href="#">MONACO</a>
+<a class="text-on-surface-variant font-label-xs text-label-xs hover:text-primary transition-colors px-3 py-1 rounded border border-surface-container-highest uppercase" href="#">MONZA</a>
+<a class="text-secondary-container font-label-xs text-label-xs transition-colors px-3 py-1 rounded border border-secondary-container bg-secondary-container/10 uppercase" href="#">SILVERSTONE CIRCUIT</a>
+<a class="text-on-surface-variant font-label-xs text-label-xs hover:text-primary transition-colors px-3 py-1 rounded border border-surface-container-highest uppercase" href="#">SPA-FRANCORCHAMPS</a>
+</nav>
+</div>
+<div class="flex items-center gap-margin">
+<div class="hidden lg:flex gap-unit">
+<a class="text-on-surface-variant font-label-xs text-label-xs hover:text-primary transition-colors px-3 py-1 rounded border border-surface-container-highest uppercase" href="#">SINGLE LAP</a>
+<a class="bg-secondary-container text-on-secondary-container font-label-xs text-label-xs transition-colors px-3 py-1 rounded border border-secondary-container uppercase" href="#">MULTI-LAP SESSION</a>
+</div>
+<button class="bg-secondary-container text-on-secondary-container font-label-xs text-label-xs px-4 py-2 rounded-DEFAULT hover:bg-secondary-container/90 transition-colors uppercase tracking-widest font-bold flex items-center gap-2">
+                LOAD SESSION VIDEO
+            </button>
+</div>
+</header>
+<!-- SideNavBar -->
+<aside class="hidden md:flex flex-col bg-surface-container-low fixed left-0 top-16 h-[calc(100vh-64px)] w-64 border-r border-surface-container-highest z-40 py-margin">
+<div class="px-margin mb-margin">
+<div class="flex items-center gap-container-padding mb-unit">
+<img alt="Lead Strategist" class="w-10 h-10 rounded-full border border-surface-container-highest bg-surface-container" data-alt="A tactical, high-contrast headshot silhouette of a lead race strategist against a dark, glowing cyan background, minimalist and professional." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD6FFmgBS0EHU0rsXEtbwGrx7NAinCKM4fwZTBOMozkzkcybYu7A1Dhh9vzhcmJwMos_yfDMgit8MMVKJIhl4hqgHPvbZIIKvGBsbBZgYnuhEV5c2CWu4yT8HfrDV5j94lxkBJOEipTTXptC5rNj7AASyJAf0ePwOsG14mbT7vEYD2zFtwN_fhBhsyOodIkXS4xc1EG99E5oyR37xilMzd_m67PqW-KJCnsQvxRD17yKM3-yxDiZMkd"/>
+<div>
+<h2 class="font-telemetry-data text-[14px] text-on-surface leading-tight font-bold">STRAT_CONTROL</h2>
+<p class="font-label-xs text-[10px] text-secondary uppercase">SESSION ACTIVE</p>
+</div>
+</div>
+<button class="w-full mt-container-padding border border-error text-error font-label-xs text-label-xs py-2 rounded-DEFAULT hover:bg-error/10 transition-colors cursor-pointer uppercase">
+                EMERGENCY OVERRIDE
+            </button>
+</div>
+<nav class="flex-1 flex flex-col gap-unit">
+<a class="flex items-center gap-container-padding px-margin py-3 text-on-surface-variant hover:bg-surface-container-highest cursor-pointer transition-all" href="#">
+<span class="material-symbols-outlined">emergency_home</span>
+<span class="font-label-xs text-label-xs uppercase">Override</span>
+</a>
+<a class="flex items-center gap-container-padding px-margin py-3 text-on-surface-variant hover:bg-surface-container-highest cursor-pointer transition-all" href="#">
+<span class="material-symbols-outlined">history_edu</span>
+<span class="font-label-xs text-label-xs uppercase">Log</span>
+</a>
+<a class="flex items-center gap-container-padding px-margin py-3 bg-secondary-container/20 text-secondary-container border-r-2 border-secondary-container cursor-pointer transition-all" href="#">
+<span class="material-symbols-outlined">query_stats</span>
+<span class="font-label-xs text-label-xs uppercase">Telemetry</span>
+</a>
+<a class="flex items-center gap-container-padding px-margin py-3 text-on-surface-variant hover:bg-surface-container-highest cursor-pointer transition-all" href="#">
+<span class="material-symbols-outlined">settings_backup_restore</span>
+<span class="font-label-xs text-label-xs uppercase">Pit-Stop</span>
+</a>
+</nav>
+</aside>
+<!-- Main Content Canvas -->
+<main class="pt-20 pb-16 md:pl-64 min-h-screen flex flex-col">
+<div class="flex-1 p-margin grid grid-cols-12 gap-gutter content-start">
+<!-- Dashboard Header & Trend -->
+<div class="col-span-12 flex justify-between items-end mb-container-padding border-b border-surface-container pb-unit">
+<div>
+<h1 class="font-headline-xl text-headline-xl text-on-surface uppercase tracking-tight">MULTI-LAP ANALYSIS</h1>
+<p class="font-telemetry-data text-telemetry-data text-outline mt-unit">Session Mode: Full Video Upload Processing</p>
+</div>
+<div class="glass-panel px-container-padding py-unit rounded-DEFAULT corner-bracket border-t-0 border-l-0 border-primary-fixed-dim/50 flex items-center gap-container-padding bg-surface-container-low">
+<span class="material-symbols-outlined text-primary-fixed-dim" style="font-variation-settings: 'FILL' 1;">trending_down</span>
+<div>
+<div class="font-label-xs text-label-xs text-outline uppercase">Session Trend</div>
+<div class="font-telemetry-data text-telemetry-data text-primary-fixed-dim">Slope: -0.014/lap - Drying</div>
+</div>
+</div>
+</div>
+<!-- Lap Strip (Horizontal) -->
+<div class="col-span-12 mb-margin">
+<h3 class="font-label-xs text-label-xs text-primary-fixed-dim mb-unit uppercase tracking-widest flex items-center gap-unit"><span class="w-1 h-1 bg-primary-fixed-dim rounded-full"></span> Lap Strip Visualization</h3>
+<div class="flex overflow-x-auto gap-container-padding pb-container-padding snap-x">
+<!-- Lap Card 1 -->
+<div class="glass-panel min-w-[200px] rounded-lg p-unit snap-start group cursor-pointer hover:border-primary-fixed-dim/50 transition-colors">
+<div class="relative h-24 bg-surface-container-highest rounded-DEFAULT overflow-hidden mb-unit border border-surface-container-highest">
+<img class="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" data-alt="A dark, high-contrast telemetry reference frame showing a race car entering a wet corner from an onboard camera perspective, desaturated colors with a cyan overlay indicating analyzed path." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDKGPeq3xqIT7zoCS14o1NH96mFvVwGDa-rsFQezjo0burpXhcxq-NogSqsRMKb4AtLUVq7zokJNGmook6Vg1NVXMGs7zC71PSrSCE6XdYH-O12BUXpok3RkFbQDYP0g5SDaLx1SD5ubAXqpXQT5JyegU2YY2xUo6qAbQJnC_samwDie9HeI6J6odUJv-RfXXINaXdkRQfbPZ5qE40mUhYeJ0uhqoyHzgP3C8WKXo8KuJlrJjI4loLn"/>
+<div class="absolute top-1 left-1 bg-surface-dim/80 px-1 rounded text-[10px] font-telemetry-data text-on-surface">L42</div>
+</div>
+<div class="flex justify-between items-center px-1">
+<span class="font-label-xs text-label-xs text-outline uppercase">Wetness</span>
+<span class="font-telemetry-data text-telemetry-data text-secondary">84%</span>
+</div>
+</div>
+<!-- Lap Card 2 -->
+<div class="glass-panel min-w-[200px] rounded-lg p-unit snap-start group cursor-pointer hover:border-primary-fixed-dim/50 transition-colors">
+<div class="relative h-24 bg-surface-container-highest rounded-DEFAULT overflow-hidden mb-unit border border-surface-container-highest">
+<img class="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" data-alt="A dark, high-contrast telemetry reference frame showing a race car navigating a partially damp chicane, overhead track camera view, moody lighting with neon cyan UI overlays." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBKSGUZ387ZeBTtrQ-UCR8MKYF7FqrSQm-hRkbGPXCv6Yl38L_LrGTXYSkPG8VAGaUbDuv3cd7XtCRHj5TX0y7pycJq7zHnXZgGQqOL22EQafxvI7eQmMjeU-gkTf_HXw3_wWka1327mqNbgCm0JSyq2GfceZJZlPW_EHkDNj6ZGvGBmTj6SwqAtaPbHn_TiOZWQpRtYEgTB_2oHvREEtqocC6cLVmxKWO2LDq72FjeNlqJw_SBLLPW"/>
+<div class="absolute top-1 left-1 bg-surface-dim/80 px-1 rounded text-[10px] font-telemetry-data text-on-surface">L43</div>
+</div>
+<div class="flex justify-between items-center px-1">
+<span class="font-label-xs text-label-xs text-outline uppercase">Wetness</span>
+<span class="font-telemetry-data text-telemetry-data text-tertiary-fixed">62%</span>
+</div>
+</div>
+<!-- Lap Card 3 (Active/Highlight) -->
+<div class="glass-panel min-w-[200px] rounded-lg p-unit snap-start border-primary-fixed-dim/50 bg-primary-fixed-dim/5 shadow-[inset_0_0_15px_rgba(0,219,231,0.1)] corner-bracket relative">
+<div class="relative h-24 bg-surface-container-highest rounded-DEFAULT overflow-hidden mb-unit border border-primary-fixed-dim/30">
+<img class="w-full h-full object-cover opacity-90" data-alt="A dark, high-contrast telemetry reference frame showing a race car on a clearly drying line down a straight, sharp focus, technical aesthetic with glowing cyan data points." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDdBZ1txjivvRk6Cf3m0gvxboMNj7wIL1xHB0xTJYRSm3ogy_276x-HFH1pfjLFzsOlzqvVIJOntmuaR3gdHg50bmnqDbWPSW1gvt0wvpvJ7nTdrfBfuvuAP3Yv0CGtltXeUVBFUBNFeEiQSlPidnmurpCdvOeWHaKFyIQu4CZk-IHRrmnKMvozuaIZ2WRtgJd7Gphj7hibOLEKk2QexYlVLRkiiVfATcsFO9g28PK4tpVYBXHb4wXy"/>
+<div class="absolute top-1 left-1 bg-primary-fixed-dim text-on-primary px-1 rounded text-[10px] font-telemetry-data font-bold">L44</div>
+</div>
+<div class="flex justify-between items-center px-1">
+<span class="font-label-xs text-label-xs text-primary-fixed-dim uppercase">Wetness</span>
+<span class="font-telemetry-data text-telemetry-data text-primary-fixed-dim">41%</span>
+</div>
+</div>
+<!-- Lap Card 4 -->
+<div class="glass-panel min-w-[200px] rounded-lg p-unit snap-start group cursor-pointer hover:border-primary-fixed-dim/50 transition-colors">
+<div class="relative h-24 bg-surface-container-highest rounded-DEFAULT overflow-hidden mb-unit border border-surface-container-highest">
+<img class="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" data-alt="A dark, high-contrast telemetry reference frame showing a race car apexing a dry corner, dynamic angle, tactical overlay with muted neon colors." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBUwYY5Zyin61zEhL42fUJRCIP0hHeeBGx27i8bpGeEl2Mg62xUb_Tzhyy7Nez_tvl2EF_nPzfyOYk4QpdVZsxcXhh7dJ1a2ZykUfSJ4Od1Pbxj-y3-NzOhUGCg8q7PQ2vByWcIMKPrDQBUEAEDCdb_bA2ZlLG-XDYtrfYlIbYbQhNV9Ml0jnvGFOqB92m8H5N0q7m0Z-HR83ouZ87HOXKtmNdVctbtS4NTuHzU0EniGxlIRLXQFQF7"/>
+<div class="absolute top-1 left-1 bg-surface-dim/80 px-1 rounded text-[10px] font-telemetry-data text-on-surface">L45</div>
+</div>
+<div class="flex justify-between items-center px-1">
+<span class="font-label-xs text-label-xs text-outline uppercase">Wetness</span>
+<span class="font-telemetry-data text-telemetry-data text-primary-fixed-dim">18%</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Analytics Layout: Left Col (Table) + Right Col (Charts) -->
+<div class="col-span-12 lg:col-span-8 glass-panel rounded-xl overflow-hidden flex flex-col h-full">
+<div class="px-container-padding py-3 border-b border-surface-container bg-surface-container-highest/20 flex justify-between items-center">
+<h3 class="font-label-xs text-label-xs text-primary-fixed-dim uppercase tracking-widest">Corner Analytics: Drying Line Detection</h3>
+<button class="border border-surface-container-highest bg-surface-container rounded px-2 py-1 font-label-xs text-label-xs text-on-surface hover:text-primary-fixed-dim hover:border-primary-fixed-dim transition-colors">EXPORT CSV</button>
+</div>
+<div class="overflow-x-auto flex-1">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="border-b border-surface-container text-primary-fixed-dim font-label-xs text-label-xs h-data-row-height">
+<th class="px-container-padding font-medium">Corner</th>
+<th class="px-container-padding font-medium">Sector</th>
+<th class="px-container-padding font-medium">L42 Wet%</th>
+<th class="px-container-padding font-medium">L43 Wet%</th>
+<th class="px-container-padding font-medium">L44 Wet%</th>
+<th class="px-container-padding font-medium">L45 Wet%</th>
+<th class="px-container-padding font-medium">Est. Dry Lap</th>
+</tr>
+</thead>
+<tbody class="font-telemetry-data text-telemetry-data text-on-surface">
+<tr class="border-b border-surface-container/50 h-data-row-height hover:bg-surface-container-highest/20 transition-colors">
+<td class="px-container-padding flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-secondary"></span> T1</td>
+<td class="px-container-padding text-outline">S1</td>
+<td class="px-container-padding text-secondary">92%</td>
+<td class="px-container-padding text-tertiary-fixed">75%</td>
+<td class="px-container-padding text-primary-fixed-dim">50%</td>
+<td class="px-container-padding text-primary-fixed-dim">22%</td>
+<td class="px-container-padding text-on-surface-variant">L47</td>
+</tr>
+<tr class="border-b border-surface-container/50 h-data-row-height bg-surface-container-highest/10 hover:bg-surface-container-highest/20 transition-colors">
+<td class="px-container-padding flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-tertiary-fixed"></span> T2</td>
+<td class="px-container-padding text-outline">S1</td>
+<td class="px-container-padding text-secondary">88%</td>
+<td class="px-container-padding text-tertiary-fixed">60%</td>
+<td class="px-container-padding text-primary-fixed-dim">35%</td>
+<td class="px-container-padding text-primary-fixed-dim">12%</td>
+<td class="px-container-padding text-on-surface-variant">L46</td>
+</tr>
+<tr class="border-b border-surface-container/50 h-data-row-height hover:bg-surface-container-highest/20 transition-colors">
+<td class="px-container-padding flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-primary-fixed-dim"></span> T4</td>
+<td class="px-container-padding text-outline">S1</td>
+<td class="px-container-padding text-tertiary-fixed">70%</td>
+<td class="px-container-padding text-primary-fixed-dim">45%</td>
+<td class="px-container-padding text-primary-fixed-dim">20%</td>
+<td class="px-container-padding text-primary-fixed-dim">05%</td>
+<td class="px-container-padding text-on-surface-variant">L45</td>
+</tr>
+<tr class="h-data-row-height bg-surface-container-highest/10 hover:bg-surface-container-highest/20 transition-colors border-b border-surface-container/50">
+<td class="px-container-padding flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-secondary"></span> T8 (Hairpin)</td>
+<td class="px-container-padding text-outline">S2</td>
+<td class="px-container-padding text-secondary">95%</td>
+<td class="px-container-padding text-secondary">85%</td>
+<td class="px-container-padding text-tertiary-fixed">70%</td>
+<td class="px-container-padding text-primary-fixed-dim">55%</td>
+<td class="px-container-padding text-error">L50+</td>
+</tr>
+<tr class="h-data-row-height hover:bg-surface-container-highest/20 transition-colors">
+<td class="px-container-padding flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-tertiary-fixed"></span> T11</td>
+<td class="px-container-padding text-outline">S3</td>
+<td class="px-container-padding text-secondary">82%</td>
+<td class="px-container-padding text-tertiary-fixed">65%</td>
+<td class="px-container-padding text-primary-fixed-dim">40%</td>
+<td class="px-container-padding text-primary-fixed-dim">15%</td>
+<td class="px-container-padding text-on-surface-variant">L46</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="col-span-12 lg:col-span-4 flex flex-col gap-gutter">
+<!-- Bar Chart: Wetness Per Lap -->
+<div class="glass-panel rounded-xl p-container-padding flex flex-col h-64">
+<h3 class="font-label-xs text-label-xs text-primary-fixed-dim uppercase tracking-widest mb-4">Wetness Per Lap (Avg)</h3>
+<div class="flex-1 flex items-end justify-around gap-2 px-2 pb-2 border-b border-l border-surface-container">
+<!-- Chart Bars -->
+<div class="w-1/4 bg-secondary/80 hover:bg-secondary transition-colors relative group h-[85%] rounded-t-sm flex justify-center">
+<span class="absolute -top-5 opacity-0 group-hover:opacity-100 font-telemetry-data text-[10px] text-secondary">85%</span>
+<span class="absolute -bottom-5 font-label-xs text-[10px] text-outline">L42</span>
+</div>
+<div class="w-1/4 bg-tertiary-fixed/80 hover:bg-tertiary-fixed transition-colors relative group h-[68%] rounded-t-sm flex justify-center">
+<span class="absolute -top-5 opacity-0 group-hover:opacity-100 font-telemetry-data text-[10px] text-tertiary-fixed">68%</span>
+<span class="absolute -bottom-5 font-label-xs text-[10px] text-outline">L43</span>
+</div>
+<div class="w-1/4 bg-primary-fixed-dim/80 hover:bg-primary-fixed-dim transition-colors relative group h-[42%] rounded-t-sm flex justify-center shadow-[0_0_10px_rgba(0,219,231,0.3)] border-t border-primary-fixed">
+<span class="absolute -top-5 opacity-0 group-hover:opacity-100 font-telemetry-data text-[10px] text-primary-fixed-dim">42%</span>
+<span class="absolute -bottom-5 font-label-xs text-[10px] text-primary-fixed-dim">L44</span>
+</div>
+<div class="w-1/4 bg-primary-fixed-dim/40 hover:bg-primary-fixed-dim/60 transition-colors relative group h-[21%] rounded-t-sm flex justify-center">
+<span class="absolute -top-5 opacity-0 group-hover:opacity-100 font-telemetry-data text-[10px] text-primary-fixed-dim">21%</span>
+<span class="absolute -bottom-5 font-label-xs text-[10px] text-outline">L45</span>
+</div>
+</div>
+</div>
+<!-- Weather Forecast & Projection -->
+<div class="glass-panel rounded-xl p-container-padding flex-1 bg-surface-container-lowest/50 border border-surface-container-highest">
+<h3 class="font-label-xs text-label-xs text-primary-fixed-dim uppercase tracking-widest mb-2 flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">partly_cloudy_day</span> Forecast + Projection
+                    </h3>
+<div class="grid grid-cols-2 gap-2 mt-4">
+<div class="bg-surface-container p-2 rounded-sm border border-surface-container-highest">
+<div class="font-label-xs text-[10px] text-outline uppercase">Next 15 Min</div>
+<div class="font-telemetry-data text-[14px] text-on-surface">No Rain, 18°C</div>
+</div>
+<div class="bg-surface-container p-2 rounded-sm border border-surface-container-highest">
+<div class="font-label-xs text-[10px] text-outline uppercase">Track Temp</div>
+<div class="font-telemetry-data text-[14px] text-tertiary-fixed flex items-center gap-1">
+                                22°C <span class="material-symbols-outlined text-[12px]">arrow_upward</span>
+</div>
+</div>
+</div>
+<div class="mt-4 pt-3 border-t border-surface-container-highest">
+<p class="font-label-xs text-[11px] text-on-surface-variant leading-tight">
+                            Projection: Track crossover to dry (slick) tires estimated between <strong class="text-primary-fixed-dim">L46-L48</strong>. Prepare pit wall for potential double-stack if safety car deployed.
+                         </p>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="bg-surface-container-lowest fixed bottom-0 right-0 w-[calc(100%-256px)] h-12 border-t border-surface-container-highest flex items-center justify-between px-gutter z-40 hidden md:flex">
+<span class="font-label-xs text-label-xs text-tertiary-fixed-dim uppercase tracking-widest">CREW_AI RADIO | ACTIVE UPLINK</span>
+<div class="flex gap-margin">
+<a class="text-on-surface-variant font-label-xs text-label-xs hover:text-primary-fixed-dim transition-colors uppercase" href="#">STRATEGY_ALPHA</a>
+<a class="text-on-surface-variant font-label-xs text-label-xs hover:text-primary-fixed-dim transition-colors uppercase" href="#">SAFETY_CAR_PROCEDURE</a>
+<a class="text-on-surface-variant font-label-xs text-label-xs hover:text-primary-fixed-dim transition-colors uppercase" href="#">FUEL_MAP_7</a>
+</div>
+</footer>
+</body></html>

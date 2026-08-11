@@ -1,4 +1,5 @@
 import type {
+  CircuitDetail,
   CircuitSummary,
   SessionReport,
   StrategistReport,
@@ -17,9 +18,10 @@ export async function getTrack(): Promise<Track> {
   return res.json();
 }
 
-export async function analyzeLap(video: File): Promise<StrategistReport> {
+export async function analyzeLap(video: File, circuitId = "silverstone"): Promise<StrategistReport> {
   const form = new FormData();
   form.append("video", video);
+  form.append("circuit_id", circuitId);
   const res = await fetch(`${API_BASE}/api/analyze`, { method: "POST", body: form });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -32,6 +34,14 @@ export async function getCircuits(): Promise<CircuitSummary[]> {
   const res = await fetch(`${API_BASE}/api/circuits`);
   if (!res.ok) throw new Error(`Failed to load circuits: ${res.status}`);
   return (await res.json()).circuits;
+}
+
+/** Full offline-built circuit record -- SC windows, pit loss, degradation.
+ * Static, no video required, so it can be shown right after picking a circuit. */
+export async function getCircuitDetail(circuitId: string): Promise<CircuitDetail> {
+  const res = await fetch(`${API_BASE}/api/circuits/${circuitId}`);
+  if (!res.ok) throw new Error(`Failed to load circuit detail: ${res.status}`);
+  return res.json();
 }
 
 /** Multi-lap analysis: a trend over laps rather than over one lap's corners. */

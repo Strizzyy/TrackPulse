@@ -1,12 +1,13 @@
 import type { CSSProperties } from "react";
 
-// Base hues per condition, picked to stay legible as text on the carbon
-// (#15151E) dark surfaces -- brighter steps than the old light-theme solids.
+// Apex Control palette: Racing Cyan = dry/optimal, Gold = caution/mid,
+// Neon Red-Pink = wet/alert -- same semantics as the strategy board's
+// compound colors and DESIGN.md's "Circuit Intelligence Palette".
 export const LABEL_COLORS: Record<string, string> = {
-  dry: "#f59e0b", // amber, dry asphalt
-  damp: "#facc15", // yellow
-  drying: "#a3e635", // lime, improving
-  wet: "#38bdf8", // sky blue
+  dry: "#00dbe7", // primary-fixed-dim, racing cyan
+  damp: "#e8c423", // tertiary-fixed-dim, gold
+  drying: "#74f5ff", // primary-fixed, lighter cyan -- improving, still cool-toned
+  wet: "#ff525c", // secondary-container, neon red-pink
 };
 
 export function colorForLabel(label: string): string {

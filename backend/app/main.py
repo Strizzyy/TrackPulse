@@ -157,14 +157,22 @@ async def analyze_session(
     enriched, dropped = _score_video(session_id, video, corner_defs, lap_duration)
     session_module.segment_laps(enriched, lap_duration)
     lap_summaries = session_module.build_lap_summaries(enriched)
-    session_trend = session_module.compute_session_trend(lap_summaries)
+    # Excludes sparse/partial laps (almost always the tail end of an upload
+    # whose length isn't an exact multiple of lap_duration_sec) from the trend
+    # fit and from standing in as "current conditions" -- see session.py.
+    # `lap_summaries` itself keeps every lap, flagged, for the UI.
+    usable = session_module.usable_laps(lap_summaries)
+    current_lap = usable[-1]
+    session_trend = session_module.compute_session_trend(usable)
 
     for f in enriched:
         f["label"] = trend_module.label_for_score(f["wetness_score"], session_trend["slope_per_lap"])
 
-    forecast_raw = await weather.get_precipitation_forecast(minutes_ahead=15)
+    forecast_raw = await weather.get_precipitation_forecast(
+        minutes_ahead=15, lat=circuit.get("lat", weather.SILVERSTONE_LAT), lon=circuit.get("lon", weather.SILVERSTONE_LON)
+    )
     forecast = weather.project_condition(
-        lap_summaries[-1]["avg_wetness"],
+        current_lap["avg_wetness"],
         # Already per-lap -- no conversion needed here, unlike the single-lap path.
         session_trend["slope_per_lap"],
         forecast_raw["precipitation_mm"],
@@ -174,10 +182,10 @@ async def analyze_session(
     )
 
     sc_risk = history.get_sc_risk(
-        session_trend["slope_per_lap"], lap_summaries[-1]["avg_wetness"], circuit=circuit
+        session_trend["slope_per_lap"], current_lap["avg_wetness"], circuit=circuit
     )
     recommendation = strategy.recommend(
-        lap_summaries[-1]["avg_wetness"], session_trend["direction"], session_trend["slope_per_lap"]
+        current_lap["avg_wetness"], session_trend["direction"], session_trend["slope_per_lap"]
     )
 
     return {
@@ -224,17 +232,23 @@ async def strategy_plan(
         )
         session_module.segment_laps(enriched, lap_duration)
         lap_summaries = session_module.build_lap_summaries(enriched)
-        session_trend = session_module.compute_session_trend(lap_summaries)
+        # Same partial-lap exclusion as /api/analyze-session -- a sparse tail
+        # lap otherwise becomes both the seed "current" wetness AND drags the
+        # trend used to project the rest of the race, so it was the single
+        # biggest source of a wrong strategy call.
+        usable = session_module.usable_laps(lap_summaries)
+        current_lap = usable[-1]
+        session_trend = session_module.compute_session_trend(usable)
         # start_lap=1: the uploaded footage's lap numbering is its own, not the
         # race's. The measured condition is "now" = race lap 1, and the trend
         # continues from there. Defaulting to the video's last lap number left
         # the first several race laps pinned flat at the current value.
         wetness_by_lap = session_module.wetness_projection(
-            lap_summaries, session_trend["slope_per_lap"], total_laps, start_lap=1
+            usable, session_trend["slope_per_lap"], total_laps, start_lap=1
         )
         conditions = {
             "source": "measured from uploaded footage (CLIP)",
-            "current_wetness": lap_summaries[-1]["avg_wetness"],
+            "current_wetness": current_lap["avg_wetness"],
             "direction": session_trend["direction"],
             "slope_per_lap": session_trend["slope_per_lap"],
             "laps_analyzed": session_trend["laps_analyzed"],
@@ -276,7 +290,7 @@ async def strategy_plan(
 
 
 @app.post("/api/analyze")
-async def analyze(video: UploadFile = File(...)):
+async def analyze(video: UploadFile = File(...), circuit_id: str = Form("silverstone")):
     session_id = str(uuid.uuid4())
     session_dir = os.path.join(UPLOAD_DIR, session_id)
     os.makedirs(session_dir, exist_ok=True)
@@ -288,8 +302,31 @@ async def analyze(video: UploadFile = File(...)):
     frame_dir = os.path.join(session_dir, "frames")
     extracted = frames_module.extract_frames(video_path, frame_dir)
 
-    track = load_track()
-    lap_duration = extracted[-1]["timestamp_sec"] if len(extracted) > 1 else track["avg_lap_time_sec"]
+    # circuit_id="silverstone" (the default, and the only option before the
+    # 5-circuit picker existed) keeps using the original hand-made
+    # silverstone.json exactly as before -- this endpoint's Silverstone
+    # behaviour is pinned byte-identical (see CONTEXT.md). Any other circuit
+    # uses the real FastF1-derived corner geometry from app/data/circuits/
+    # instead, so the single-lap flow works for all 5, not just Silverstone.
+    if circuit_id == "silverstone":
+        track = load_track()
+        corners = track["corners"]
+        avg_lap_time_sec = track["avg_lap_time_sec"]
+        history_circuit = None  # get_sc_risk() falls back to sc_stats.json
+        lat, lon = weather.SILVERSTONE_LAT, weather.SILVERSTONE_LON
+        circuit_name = track["name"]
+    else:
+        circuit = circuits.load(circuit_id)
+        if circuit is None:
+            raise HTTPException(404, f"No data for circuit '{circuit_id}'")
+        corners = circuits.corners_for_mapping(circuit)
+        avg_lap_time_sec = circuit.get("avg_lap_time_sec") or 90.0
+        history_circuit = circuit
+        lat = circuit.get("lat", weather.SILVERSTONE_LAT)
+        lon = circuit.get("lon", weather.SILVERSTONE_LON)
+        circuit_name = circuit.get("name")
+
+    lap_duration = extracted[-1]["timestamp_sec"] if len(extracted) > 1 else avg_lap_time_sec
 
     # analyze_frames() gets both signals (wetness + is-this-actually-track-
     # footage) in one CLIP pass per frame. Real YouTube clips often have
@@ -303,7 +340,7 @@ async def analyze(video: UploadFile = File(...)):
         if analysis["is_racing"] < vision.RACING_THRESHOLD:
             dropped_non_racing += 1
             continue
-        corner = trend_module.map_corner(f["timestamp_sec"], lap_duration, track["corners"])
+        corner = trend_module.map_corner(f["timestamp_sec"], lap_duration, corners)
         enriched.append(
             {
                 "frame_index": f["frame_index"],
@@ -324,7 +361,7 @@ async def analyze(video: UploadFile = File(...)):
     corners_summary = trend_module.build_corner_summary(enriched)
     current = trend_module.current_condition_summary(enriched, trend_stats["recent_slope"])
 
-    forecast_raw = await weather.get_precipitation_forecast(minutes_ahead=15)
+    forecast_raw = await weather.get_precipitation_forecast(minutes_ahead=15, lat=lat, lon=lon)
     # compute_trend() measures slope in wetness per SECOND, but
     # project_condition() applies its slope once per LAP. Passing the raw value
     # under-weighted the measured trend by roughly the lap length (~90x).
@@ -334,13 +371,13 @@ async def analyze(video: UploadFile = File(...)):
     # length amplifies its noise just as much as its signal -- it produced a
     # +0.26/lap "trend" on a clip whose overall slope is flat. The full-lap fit
     # is the most stable per-lap rate a single lap of footage can support.
-    slope_per_lap = trend_stats["slope"] * track["avg_lap_time_sec"]
+    slope_per_lap = trend_stats["slope"] * avg_lap_time_sec
     forecast = weather.project_condition(
         current["wetness_score"],
         slope_per_lap,
         forecast_raw["precipitation_mm"],
         num_laps=10,
-        avg_lap_time_sec=track["avg_lap_time_sec"],
+        avg_lap_time_sec=avg_lap_time_sec,
         precipitation_probability_pct=forecast_raw.get("precipitation_probability_pct"),
     )
 
@@ -348,7 +385,9 @@ async def analyze(video: UploadFile = File(...)):
         forecast["projected_wetness"], forecast["horizon_laps"], enriched
     )
 
-    sc_risk = history.get_sc_risk(trend_stats["recent_slope"], current["wetness_score"])
+    sc_risk = history.get_sc_risk(
+        trend_stats["recent_slope"], current["wetness_score"], circuit=history_circuit
+    )
     recommendation = strategy.recommend(current["wetness_score"], trend_stats["direction"], trend_stats["recent_slope"])
     trend_summary = trend_module.trend_summary_text(trend_stats["direction"], corners_summary)
 
@@ -377,6 +416,8 @@ async def analyze(video: UploadFile = File(...)):
 
     return {
         "session_id": session_id,
+        "circuit_id": circuit_id,
+        "circuit_name": circuit_name,
         "current_condition": {
             "label": current["label"],
             "wetness_score": current["wetness_score"],

@@ -17,7 +17,9 @@ RAIN_FALLING_MM = 0.1  # mm over the window that counts as "it is raining"
 RAIN_LIKELY_PCT = 50.0  # probability at/above which we lean wet pre-emptively
 
 
-async def get_precipitation_forecast(minutes_ahead: int = 15) -> Dict:
+async def get_precipitation_forecast(
+    minutes_ahead: int = 15, lat: float = SILVERSTONE_LAT, lon: float = SILVERSTONE_LON
+) -> Dict:
     """Free, no-API-key precipitation forecast. Fails soft: on any error
     (no network, rate limit, etc.) returns available=False so the caller
     can fall back to trend-only projection instead of crashing the request.
@@ -27,10 +29,15 @@ async def get_precipitation_forecast(minutes_ahead: int = 15) -> Dict:
       precipitation_probability -- percent chance, i.e. how likely at all
     These are not interchangeable. An earlier version reported mm * 100 under
     the name "rain_probability_pct", so 0.3mm of drizzle displayed as "30%".
+
+    `lat`/`lon` default to Silverstone for the single-lap endpoint, which is
+    Silverstone-only. The multi-circuit session/strategy endpoints must pass
+    the selected circuit's own coordinates -- otherwise a Monaco or Suzuka
+    session was silently scored against Silverstone's weather.
     """
     params = {
-        "latitude": SILVERSTONE_LAT,
-        "longitude": SILVERSTONE_LON,
+        "latitude": lat,
+        "longitude": lon,
         "minutely_15": "precipitation,precipitation_probability",
         "forecast_days": 1,
     }

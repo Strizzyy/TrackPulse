@@ -505,3 +505,196 @@ uv run python scripts/validate_replay.py --year 2023
 uv run python scripts/test_weather_branches.py   # 8/8 expected
 cd frontend && npx tsc --noEmit                  # clean expected
 ```
+
+---
+---
+
+# Part 3 — Bug fixes, track-first flow, and full UI revamp (11 Aug 2026)
+
+Picks up on top of Part 2. Two real backend bugs were found and fixed while
+verifying Multi-lap Session and Race Strategy against real footage, the
+single-lap endpoint was extended to support all 5 circuits, and the entire
+frontend was rebuilt on a new design system with track-selection-first
+navigation, accounts, and a run history.
+
+## 1. Two real bugs found verifying Part 2 against real footage
+
+### `backend/app/pipeline/session.py` — partial-lap trend contamination
+Any uploaded clip whose length isn't an exact multiple of `lap_duration_sec`
+produces a trailing lap with only 1-2 frames (vs. ~90 for a full lap at
+~1fps). `compute_session_trend()` was weighting that sparse lap equally in
+its linear fit. Measured live: a flat, real 0.27 (dry) lap followed by a
+2-frame noise tail read as a fabricated **"+0.52/lap wetting"** trend, which
+cascaded into a wrong tire call, a wrong safety-car risk, and — via
+`/api/strategy/plan` — a wrong wet-race strategy recommending intermediates
+on what was actually a dry track.
+
+Fixed with a new `usable_laps()`: excludes any lap with fewer than
+`max(5, 0.4 * median_frame_count)` frames from the trend fit and from
+seeding "current conditions," while still returning every lap (flagged
+`complete: false`) so the full `laps` list shown in the UI is unchanged.
+`main.py`'s `analyze_session` and `strategy_plan` endpoints both use the
+filtered list now. Frontend (`LapTrend.tsx`, `types.ts`) surfaces the new
+`complete` flag by fading the excluded bar and labelling it, rather than
+silently dropping it.
+
+Verified live against `data/uploads/1274e4f6.../lap.mp4`: before the fix,
+session mode read `+0.520/lap, wetting`; after, `stable, only one lap of
+data` — and `strategy/plan` on the same clip went from `wet_race: true`
+(intermediates) to the correct dry-compound plan.
+
+### `backend/app/pipeline/weather.py` — wrong coordinates for every non-Silverstone circuit
+`get_precipitation_forecast()` had `SILVERSTONE_LAT`/`LON` hardcoded with no
+parameters. Selecting Monaco or Suzuka in Multi-lap Session mode still
+silently pulled Silverstone's rain forecast. Now takes `lat`/`lon` params
+(still defaulting to Silverstone, so the single-lap endpoint's default path
+is unaffected); `main.py` passes the selected circuit's real coordinates.
+
+## 2. `/api/analyze` (Single Lap) extended to all 5 circuits
+
+Previously hardcoded to the legacy hand-made `silverstone.json` with no way
+to pick a circuit at all — CONTEXT.md's original scope note ("Silverstone
+only, no track picker") predates the 5-circuit build in Part 2. Now takes an
+optional `circuit_id` Form field:
+- `circuit_id="silverstone"` (the default) is **pinned byte-identical** to
+  the old behaviour — same file, same corner names, same everything.
+  Verified live: default call vs. explicit `circuit_id=silverstone` call
+  differ only in the CrewAI agent's phrasing (temperature 0.4, expected
+  run-to-run variance), every deterministic field identical.
+- Any other `circuit_id` uses that circuit's real FastF1 corner geometry
+  (`app/data/circuits/{id}.json`), lap time, coordinates and safety-car
+  history instead. Verified live against Monza: 11 real corners (`Turn 1`..
+  `Turn 11`) vs. Silverstone's 15 hand-named ones.
+- Response gained `circuit_id` and `circuit_name` fields (additive, doesn't
+  break the pinned Silverstone contract).
+
+## 3. Track-selection-first navigation (pre-revamp UI)
+
+Before this, the circuit picker only rendered inside Multi-lap/Strategy mode
+(`mode !== "lap"` gate) — Single Lap mode had no picker at all, which is why
+it looked broken. Fixed by making circuit selection a permanent first step
+above the mode tabs, in every mode: **pick a circuit → pick a mode → load
+footage.** Single Lap mode now passes `circuitId` into `analyzeLap()`.
+
+Also added a **Circuit Intel** panel (`CircuitIntel.tsx`, backed by the
+already-existing `GET /api/circuits/{id}`) that appears the instant a
+circuit is picked, before any footage is loaded or mode chosen: real race
+laps/lap distance/avg lap/pit loss/rain frequency, historical SC/VSC rate +
+average first-deployment lap, and an "Honest Degradation" readout (measured
+per-compound degradation plus the same measured-vs-reference confidence
+badge used in the strategy board). No backend changes needed — all of this
+was already being computed, just never surfaced outside a strategy run.
+
+## 4. Full UI revamp
+
+The user supplied three Google Stitch design exports
+(`stitch_trackpulse_ai_race_strategist (1)/(2)/(3)/`, each a `DESIGN.md` +
+`code.html` + `screen.png`) specifying a new design system —
+**"Apex Control Evolved"**: obsidian (`#050506`) base, glass panels
+(`backdrop-filter: blur`), tactical corner-bracket borders, Racing Cyan /
+Neon Red-Pink / Gold accent palette, Anybody + JetBrains Mono + Hanken
+Grotesk typefaces, Material Symbols icons. The three exports' example data
+(fake "Car 16", fake AI paragraphs, a Monaco screenshot with invented SC
+windows) was treated as **style reference only** — every number shown in
+the rebuilt app comes from the real backend contract.
+
+**Design tokens** — `frontend/src/index.css`: full Material-You-style color
+system as a Tailwind v4 `@theme` block (`--color-primary-fixed-dim`, etc.),
+3 custom font families, `.glass-panel` / `.tactical-border` / compound-color
+utility classes. `index.html` pulls in the 3 Google Fonts + Material
+Symbols. `labelColors.ts` remapped: dry→cyan, damp/drying→gold, wet→red-pink
+(matches the mockups' own color code, not just DESIGN.md's prose).
+
+**Accounts** (explicit product decision — see below): `auth/AuthContext.tsx`
++ `pages/AuthScreen.tsx`. Real, working signup/login **against an account
+list stored only in this browser's localStorage** — there is no backend
+user/database system in this project (confirmed nothing existed before
+building this), and building one was explicitly scoped OUT this session in
+favour of a frontend-only shell. The UI says as much directly ("not a secure
+login"). "Continue as guest" bypasses it entirely. `historyKeyFor()`
+namespaces everything below by account email or `"guest"`.
+
+**Run history** (this is what makes "guest can still see their data" true):
+`history.ts` (localStorage, capped at 20 entries per identity) +
+`HistoryView.tsx`. Every completed lap/session/strategy run is recorded
+with a real summary and the full result payload; clicking an entry
+re-hydrates the exact same view. Local-only — doesn't sync across devices
+or browsers, and says so.
+
+**Track map** (`trackShapes.ts` + `TrackMap.tsx`): there is no 2D track
+geometry (X/Y telemetry) anywhere in this project —
+`build_circuit_data.py` only ever pulled 1D corner *distance* along the lap
+for the "measured vs modelled" table, not position. Rather than fabricate
+survey-accuracy the backend can't back up, this draws a **stylized,
+labelled-as-schematic** closed-loop SVG per circuit (loosely evoking each
+one's known shape — Monaco tight and boxy, Suzuka's figure-eight kink) and
+places corner markers at each corner's *real* `start_pct` along the loop via
+`SVGPathElement.getPointAtLength()`. The loop is decorative; the corner
+count, names and spacing are real.
+
+**Rebuilt views**, all now composed from `Panel` (the shared glass/tactical
+primitive):
+- `SingleLapView.tsx` — was inline in `App.tsx`, now its own component.
+- `MultiLapView.tsx` (+ new `LapStrip.tsx`, `CornerAnalyticsTable.tsx`) —
+  real per-lap frame thumbnails in a horizontal strip, and a corner × lap
+  wetness pivot table with an "Est. dry" column derived from the real
+  session trend slope (only populated when `direction === "drying"` — no
+  guess offered otherwise).
+- `StrategyBoard.tsx` — plan rows are now selectable (local UI state), with
+  an Accept/Manual-Override pair addressing a sliver of the long-flagged
+  "human-in-the-loop" gap from Part 1 — explicitly **not** persisted
+  anywhere, the panel says so. The mockup's "confidence %" bar was
+  reinterpreted as "vs optimal" (`100 * (1 - delta_to_best_sec / maxDelta)`)
+  since there's no real probabilistic confidence score to report, and
+  showing one would misrepresent the simulator.
+- `RecommendationPanel.tsx`, `TrendChart.tsx`, `RaceWetnessChart.tsx`,
+  `CornerStrip.tsx` — recolored/refonted only, logic unchanged.
+
+**Shell**: `components/shell/TopNav.tsx` (brand + circuit picker + account),
+`SideNav.tsx` (mode nav + history + a "Reset session" button styled like the
+mockups' Emergency Override, wired to a real `clearResults()`), `Footer.tsx`
+(real backend-reachability + CrewAI-agent-active status, not the mockups'
+fake `FUEL_MAP_7` links). SideNav is desktop-only (`hidden md:flex`), so
+`App.tsx` also has a compact `md:hidden` mode/history/reset row — without it
+mobile would have had no way to switch modes at all.
+
+**Verification**: no headless browser was available in this environment, so
+this was verified via `npx tsc --noEmit` (clean), `npx oxlint` (clean, 2
+harmless fast-refresh warnings on the auth context file), and forcing Vite's
+dev server to transform every new/changed module (all 200s) — not an actual
+screenshot. **Worth a real visual pass before demoing.**
+
+## New files (this session)
+
+```
+frontend/src/auth/AuthContext.tsx
+frontend/src/pages/AuthScreen.tsx
+frontend/src/history.ts
+frontend/src/trackShapes.ts
+frontend/src/components/TrackMap.tsx
+frontend/src/components/CircuitIntel.tsx        (new panel; endpoint already existed)
+frontend/src/components/LapStrip.tsx
+frontend/src/components/CornerAnalyticsTable.tsx
+frontend/src/components/MultiLapView.tsx
+frontend/src/components/SingleLapView.tsx
+frontend/src/components/HistoryView.tsx
+frontend/src/components/shell/TopNav.tsx
+frontend/src/components/shell/SideNav.tsx
+frontend/src/components/shell/Footer.tsx
+```
+
+## Still open
+
+Everything from Parts 1-2, plus:
+1. **No real visual QA pass** on the revamp (see above) — do this first.
+2. **Track map is schematic, not accurate.** Fixing this for real needs
+   `build_circuit_data.py` to additionally pull X/Y telemetry
+   (`get_telemetry()` has it) and persist a real polyline per circuit — not
+   done, scoped out as a bigger data task.
+3. **Auth is local-only by design this session** (see "Accounts" above) — a
+   real backend user system (hashed passwords, sessions, per-user history in
+   a real database rather than localStorage) is a legitimate next step if
+   this needs to work across devices/browsers, not a bug.
+4. **StrategyBoard's accept/override is local-only UI state** — if the
+   human-in-the-loop decision needs to be logged anywhere durable (the
+   original Part 1 pitch), that's still unbuilt.

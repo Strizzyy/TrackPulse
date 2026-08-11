@@ -27,6 +27,18 @@ from app.pipeline import trend as trend_module
 # extrapolates to a complete wet-to-dry change inside half a race distance.
 LAP_SLOPE_EPS = 0.008
 
+# A lap video's length is rarely an exact multiple of lap_duration_sec, so
+# segment_laps() almost always produces a trailing lap with just a couple of
+# frames caught at the tail of the upload -- not a real lap of racing, just
+# leftover seconds. At ~1fps that lap's "average" is one or two noisy frames
+# standing in for what should be an ~90-frame lap, and a linear fit that
+# weights it the same as every full lap gets dragged wherever those couple of
+# frames happen to point. Measured on a real clip: a flat, dry lap followed by
+# a 2-frame tail read as "+0.52/lap wetting" -- a fabricated trend from noise,
+# not signal.
+MIN_LAP_FRAME_RATIO = 0.4
+MIN_LAP_FRAMES = 5
+
 
 def segment_laps(frames: List[Dict], lap_duration_sec: float) -> List[Dict]:
     """Tag each frame with the lap it belongs to. Fixed-duration segmentation:
@@ -60,9 +72,41 @@ def build_lap_summaries(frames: List[Dict]) -> List[Dict]:
                 "frame_count": len(lap_frames),
                 "image_url": representative["image_url"],
                 "corners": trend_module.build_corner_summary(lap_frames),
+                # Filled in by usable_laps() once every lap's frame count is
+                # known -- a single lap can't judge whether it's a full lap
+                # relative to the others.
+                "complete": True,
             }
         )
     return summaries
+
+
+def usable_laps(lap_summaries: List[Dict]) -> List[Dict]:
+    """Flag and separate out sparse laps (almost always a partial lap caught
+    at the tail of the upload) so they don't get an equal vote in the trend
+    fit or stand in as "current conditions". Returns only the usable ones, in
+    order; `lap_summaries` itself is mutated to carry the `complete` flag so
+    the full lap-by-lap list -- including the excluded lap -- can still be
+    shown in the UI.
+
+    Falls back to returning everything if the filter would leave nothing
+    (e.g. every lap in a short clip is sparse) -- a noisy trend beats no
+    trend at all in that edge case, and it is what the pre-existing behaviour
+    was."""
+    if len(lap_summaries) <= 1:
+        return lap_summaries
+
+    counts = sorted(s["frame_count"] for s in lap_summaries)
+    median_count = counts[len(counts) // 2]
+    threshold = max(MIN_LAP_FRAMES, median_count * MIN_LAP_FRAME_RATIO)
+
+    usable = []
+    for summary in lap_summaries:
+        summary["complete"] = summary["frame_count"] >= threshold
+        if summary["complete"]:
+            usable.append(summary)
+
+    return usable or lap_summaries
 
 
 def compute_session_trend(lap_summaries: List[Dict]) -> Dict:

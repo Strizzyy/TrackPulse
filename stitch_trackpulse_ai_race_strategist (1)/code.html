@@ -1,0 +1,422 @@
+<!DOCTYPE html><html class="dark" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Race Strategy Optimizer</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Anybody:wght@700;800&amp;family=JetBrains+Mono:wght@500;600&amp;family=Hanken+Grotesk:wght@400&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container-highest": "#353437",
+                        "tertiary-fixed": "#ffe173",
+                        "primary": "#e1fdff",
+                        "secondary-fixed-dim": "#ffb3b2",
+                        "on-surface": "#e5e1e4",
+                        "surface-dim": "#131315",
+                        "surface-tint": "#00dbe7",
+                        "on-secondary-container": "#5b000f",
+                        "background": "#131315",
+                        "error": "#ffb4ab",
+                        "surface-container-lowest": "#0e0e10",
+                        "on-secondary": "#680012",
+                        "on-primary": "#00363a",
+                        "on-tertiary-fixed-variant": "#554500",
+                        "on-primary-fixed-variant": "#004f54",
+                        "on-secondary-fixed": "#410008",
+                        "on-tertiary-container": "#725e00",
+                        "primary-fixed-dim": "#00dbe7",
+                        "primary-container": "#00f2ff",
+                        "on-secondary-fixed-variant": "#92001e",
+                        "inverse-primary": "#00696f",
+                        "secondary": "#ffb3b2",
+                        "on-primary-container": "#006a71",
+                        "tertiary-container": "#fed83a",
+                        "surface": "#131315",
+                        "on-error": "#690005",
+                        "on-tertiary-fixed": "#221b00",
+                        "primary-fixed": "#74f5ff",
+                        "on-surface-variant": "#b9cacb",
+                        "surface-bright": "#39393b",
+                        "tertiary-fixed-dim": "#e8c423",
+                        "on-error-container": "#ffdad6",
+                        "surface-container-low": "#1c1b1d",
+                        "secondary-container": "#ff525c",
+                        "inverse-on-surface": "#313032",
+                        "on-background": "#e5e1e4",
+                        "outline-variant": "#3a494b",
+                        "secondary-fixed": "#ffdad8",
+                        "surface-variant": "#353437",
+                        "tertiary": "#fff6e4",
+                        "on-tertiary": "#3b2f00",
+                        "outline": "#849495",
+                        "surface-container": "#201f21",
+                        "surface-container-high": "#2a2a2c",
+                        "on-primary-fixed": "#002022",
+                        "inverse-surface": "#e5e1e4",
+                        "error-container": "#93000a"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "unit": "4px",
+                        "data-row-height": "32px",
+                        "margin": "24px",
+                        "container-padding": "12px",
+                        "gutter": "16px"
+                    },
+                    "fontFamily": {
+                        "headline-lg-mobile": ["Anybody"],
+                        "label-xs": ["JetBrains Mono"],
+                        "telemetry-data": ["JetBrains Mono"],
+                        "headline-xl": ["Anybody"],
+                        "body-md": ["Hanken Grotesk"],
+                        "call-to-action": ["Anybody"],
+                        "headline-lg": ["Anybody"]
+                    },
+                    "fontSize": {
+                        "headline-lg-mobile": ["24px", { "lineHeight": "1.2", "fontWeight": "700" }],
+                        "label-xs": ["11px", { "lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                        "telemetry-data": ["14px", { "lineHeight": "1", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "headline-xl": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "800" }],
+                        "body-md": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "call-to-action": ["18px", { "lineHeight": "1.4", "fontWeight": "700" }],
+                        "headline-lg": ["32px", { "lineHeight": "1.2", "fontWeight": "700" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body {
+            background-color: #050506; /* Obsidian base */
+            color: #e5e1e4;
+        }
+        /* Glassmorphism panel base */
+        .glass-panel {
+            background-color: rgba(32, 31, 33, 0.4);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(132, 148, 149, 0.2);
+        }
+        /* Tactical bracket borders */
+        .tactical-border {
+            position: relative;
+        }
+        .tactical-border::before, .tactical-border::after {
+            content: '';
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            border: 1px solid #00dbe7; /* primary-fixed-dim */
+            transition: all 0.2s ease;
+        }
+        .tactical-border::before {
+            top: -1px;
+            left: -1px;
+            border-right: none;
+            border-bottom: none;
+        }
+        .tactical-border::after {
+            bottom: -1px;
+            right: -1px;
+            border-left: none;
+            border-top: none;
+        }
+        
+        /* Compound Colors */
+        .compound-soft { color: #ff525c; border-color: #ff525c; }
+        .compound-medium { color: #fed83a; border-color: #fed83a; }
+        .compound-hard { color: #e5e1e4; border-color: #e5e1e4; }
+        .compound-inter { color: #00dbe7; border-color: #00dbe7; }
+        .compound-wet { color: #006a71; border-color: #006a71; }
+        
+        /* Timeline Graph Base */
+        .timeline-bar {
+            transition: height 0.3s ease, background-color 0.3s ease;
+        }
+        
+        /* Scrollbar styling for density */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #3a494b;
+            border-radius: 2px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #00dbe7;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col font-body-md text-body-md overflow-x-hidden pt-16 pb-12 md:pl-64">
+<!-- TopNavBar (Shared Component) -->
+<nav class="fixed top-0 left-0 w-full bg-obsidian-base/80 backdrop-blur-xl border-b border-glass-stroke shadow-[0_0_20px_rgba(255,180,167,0.1)] flex justify-between items-center px-margin h-16 z-50">
+<div class="flex items-center gap-6">
+<span class="font-headline-lg text-headline-lg font-black text-primary uppercase tracking-tighter">PITWALL_STRATEGY</span>
+<div class="hidden md:flex gap-4">
+<!-- Active Navigation: exact match intent -->
+<a class="text-primary border-b-2 border-primary pb-1 font-body-md text-body-md hover:text-primary transition-colors duration-200 active:scale-95 transition-transform" href="#">MONACO GP</a>
+<a class="text-on-surface-variant font-body-md text-body-md hover:text-primary transition-colors duration-200 active:scale-95 transition-transform" href="#">RACE MODE</a>
+<a class="text-on-surface-variant font-body-md text-body-md hover:text-primary transition-colors duration-200 active:scale-95 transition-transform" href="#">WEATHER: 24°C</a>
+</div>
+</div>
+<div class="flex gap-4">
+<button class="hover:text-primary transition-colors duration-200 active:scale-95 transition-transform">
+<span class="material-symbols-outlined text-on-surface-variant">settings</span>
+</button>
+<button class="hover:text-primary transition-colors duration-200 active:scale-95 transition-transform">
+<span class="material-symbols-outlined text-on-surface-variant">account_circle</span>
+</button>
+</div>
+</nav>
+<!-- SideNavBar (Shared Component) -->
+<aside class="hidden md:flex flex-col py-margin bg-obsidian-base/90 backdrop-blur-xl border-r border-glass-stroke fixed left-0 top-16 h-[calc(100vh-64px)] w-64 z-40 px-gutter">
+<div class="mb-8">
+<h2 class="font-headline-md text-headline-md text-on-surface">STRAT_CONTROL</h2>
+<p class="font-label-caps text-label-caps text-data-label">SESSION ACTIVE</p>
+</div>
+<nav class="flex flex-col gap-2 flex-grow">
+<!-- Active tab: Pit-Stop / Strategy intent -->
+<a class="flex items-center gap-3 px-3 py-2 cursor-pointer transition-all hover:bg-white/5 rounded text-data-label font-label-caps text-label-caps" href="#">
+<span class="material-symbols-outlined">emergency_home</span>
+<span>Override</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 cursor-pointer transition-all hover:bg-white/5 rounded text-data-label font-label-caps text-label-caps" href="#">
+<span class="material-symbols-outlined">history_edu</span>
+<span>Log</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 cursor-pointer transition-all hover:bg-white/5 rounded text-data-label font-label-caps text-label-caps" href="#">
+<span class="material-symbols-outlined">query_stats</span>
+<span>Telemetry</span>
+</a>
+<!-- Active Strategy Tab -->
+<a class="flex items-center gap-3 px-3 py-2 cursor-pointer transition-all bg-secondary-container/20 text-secondary border-r-2 border-secondary rounded font-label-caps text-label-caps" href="#">
+<span class="material-symbols-outlined">settings_backup_restore</span>
+<span>Pit-Stop</span>
+</a>
+</nav>
+<button class="mt-auto w-full py-2 bg-error-container text-on-error-container font-label-caps text-label-caps rounded tactical-border hover:bg-error/20 transition-colors">
+            EMERGENCY OVERRIDE
+        </button>
+</aside>
+<!-- Main Content Canvas -->
+<main class="flex-grow p-gutter md:p-margin flex flex-col gap-gutter">
+<!-- Top Status Bar -->
+<header class="flex flex-wrap items-center justify-between gap-4 glass-panel p-container-padding rounded-lg tactical-border">
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-secondary-container animate-pulse"></span>
+<span class="font-telemetry-data text-telemetry-data text-secondary uppercase tracking-widest">LIVE DATA FEED</span>
+</div>
+<div class="h-4 w-px bg-outline-variant"></div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-outline">timer</span>
+<span class="font-telemetry-data text-telemetry-data text-on-surface">LAP 42/78</span>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<div class="bg-surface-container px-3 py-1.5 rounded flex items-center gap-2 border border-outline-variant">
+<span class="font-label-xs text-label-xs text-outline">CIRCUIT:</span>
+<span class="font-telemetry-data text-telemetry-data text-primary">MONTE CARLO</span>
+</div>
+<div class="bg-surface-container px-3 py-1.5 rounded flex items-center gap-2 border border-outline-variant">
+<span class="font-label-xs text-label-xs text-outline">WEATHER:</span>
+<span class="material-symbols-outlined text-primary-container text-sm">cloud</span>
+<span class="font-telemetry-data text-telemetry-data text-primary">24°C / DRY</span>
+</div>
+</div>
+</header>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-1 xl:grid-cols-12 gap-gutter flex-grow">
+<!-- Left: Strategy Board (8 cols) -->
+<section class="xl:col-span-8 glass-panel rounded-lg tactical-border flex flex-col overflow-hidden">
+<div class="p-container-padding border-b border-outline-variant/30 flex justify-between items-center bg-surface-container-low/50">
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile text-primary flex items-center gap-2">
+<span class="material-symbols-outlined">route</span>
+                        STRATEGY BOARD
+                    </h3>
+<div class="flex gap-2">
+<span class="px-2 py-1 bg-surface-container-highest rounded text-label-xs font-label-xs text-outline flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-container"></span> CONFIDENCE &gt; 80%
+                        </span>
+</div>
+</div>
+<div class="p-container-padding flex flex-col gap-unit flex-grow overflow-y-auto">
+<!-- Table Header -->
+<div class="grid grid-cols-12 gap-2 px-2 py-1 border-b border-outline-variant/50">
+<div class="col-span-1 font-label-xs text-label-xs text-primary">PLAN</div>
+<div class="col-span-1 font-label-xs text-label-xs text-primary">STOPS</div>
+<div class="col-span-5 font-label-xs text-label-xs text-primary">STINT PROJECTION</div>
+<div class="col-span-2 font-label-xs text-label-xs text-primary text-right">RACE TIME DELTA</div>
+<div class="col-span-2 font-label-xs text-label-xs text-primary text-right">CONFIDENCE</div>
+<div class="col-span-1 font-label-xs text-label-xs text-primary text-center">ACT</div>
+</div>
+<!-- Plan Alpha (Recommended) -->
+<div class="grid grid-cols-12 gap-2 items-center px-2 h-data-row-height bg-primary/10 border border-primary/30 rounded group hover:bg-primary/20 transition-colors">
+<div class="col-span-1 font-telemetry-data text-telemetry-data text-primary">ALPHA</div>
+<div class="col-span-1 font-telemetry-data text-telemetry-data">1</div>
+<div class="col-span-5 flex items-center h-full gap-1 py-1">
+<!-- Stint 1 (M) -->
+<div class="h-full bg-surface-container rounded-l relative overflow-hidden group border border-outline-variant flex-grow" style="flex-basis: 40%">
+<div class="absolute inset-0 border-t-2 compound-medium"></div>
+<div class="flex items-center justify-center h-full">
+<span class="font-label-xs text-label-xs text-on-surface">M28</span>
+</div>
+</div>
+<!-- Stint 2 (H) -->
+<div class="h-full bg-surface-container rounded-r relative overflow-hidden group border border-outline-variant flex-grow" style="flex-basis: 60%">
+<div class="absolute inset-0 border-t-2 compound-hard"></div>
+<div class="flex items-center justify-center h-full">
+<span class="font-label-xs text-label-xs text-on-surface">H50</span>
+</div>
+</div>
+</div>
+<div class="col-span-2 font-telemetry-data text-telemetry-data text-primary text-right font-bold">BASE</div>
+<div class="col-span-2 flex items-center justify-end gap-2">
+<div class="w-16 h-1.5 bg-surface-container rounded-full overflow-hidden">
+<div class="h-full bg-primary-container w-[92%]"></div>
+</div>
+<span class="font-telemetry-data text-telemetry-data text-primary-container">92%</span>
+</div>
+<div class="col-span-1 flex justify-center">
+<span class="material-symbols-outlined text-primary text-sm cursor-pointer hover:scale-110 transition-transform" title="Select Plan">radio_button_checked</span>
+</div>
+</div>
+<!-- Plan Bravo (2 Stop) -->
+<div class="grid grid-cols-12 gap-2 items-center px-2 h-data-row-height hover:bg-white/5 border border-transparent hover:border-outline-variant/30 rounded transition-colors">
+<div class="col-span-1 font-telemetry-data text-telemetry-data text-on-surface">BRAVO</div>
+<div class="col-span-1 font-telemetry-data text-telemetry-data text-outline">2</div>
+<div class="col-span-5 flex items-center h-full gap-1 py-1">
+<div class="h-full bg-surface-container rounded-l relative overflow-hidden border border-outline-variant flex-grow" style="flex-basis: 30%">
+<div class="absolute inset-0 border-t-2 compound-soft"></div>
+<div class="flex items-center justify-center h-full">
+<span class="font-label-xs text-label-xs text-on-surface">S22</span>
+</div>
+</div>
+<div class="h-full bg-surface-container relative overflow-hidden border border-outline-variant flex-grow" style="flex-basis: 40%">
+<div class="absolute inset-0 border-t-2 compound-hard"></div>
+<div class="flex items-center justify-center h-full">
+<span class="font-label-xs text-label-xs text-on-surface">H30</span>
+</div>
+</div>
+<div class="h-full bg-surface-container rounded-r relative overflow-hidden border border-outline-variant flex-grow" style="flex-basis: 30%">
+<div class="absolute inset-0 border-t-2 compound-soft"></div>
+<div class="flex items-center justify-center h-full">
+<span class="font-label-xs text-label-xs text-on-surface">S26</span>
+</div>
+</div>
+</div>
+<div class="col-span-2 font-telemetry-data text-telemetry-data text-secondary text-right">+4.2s</div>
+<div class="col-span-2 flex items-center justify-end gap-2">
+<div class="w-16 h-1.5 bg-surface-container rounded-full overflow-hidden">
+<div class="h-full bg-tertiary-fixed-dim w-[78%]"></div>
+</div>
+<span class="font-telemetry-data text-telemetry-data text-tertiary-fixed-dim">78%</span>
+</div>
+<div class="col-span-1 flex justify-center">
+<span class="material-symbols-outlined text-outline text-sm cursor-pointer hover:text-primary transition-colors" title="Select Plan">radio_button_unchecked</span>
+</div>
+</div>
+<!-- Empty rows for density structure -->
+<div class="grid grid-cols-12 gap-2 items-center px-2 h-data-row-height bg-white/2 rounded"></div>
+<div class="grid grid-cols-12 gap-2 items-center px-2 h-data-row-height rounded"></div>
+</div>
+</section>
+<!-- Right: Strategic Recommendations (4 cols) -->
+<section class="xl:col-span-4 glass-panel rounded-lg tactical-border flex flex-col bg-surface-container-low/30">
+<div class="p-container-padding border-b border-outline-variant/30 bg-surface-container-low/50">
+<h3 class="font-label-caps text-label-caps text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">precision_manufacturing</span>
+                        AI RECOMMENDATION
+                    </h3>
+</div>
+<div class="p-container-padding flex flex-col gap-4 flex-grow justify-between">
+<div>
+<div class="flex items-start gap-3 mb-4">
+<span class="material-symbols-outlined text-primary-container mt-1">info</span>
+<p class="font-body-md text-body-md text-on-surface-variant leading-tight">
+                                Telemetry indicates faster than expected degradation on Medium compound (front-left). Recommend advancing Pit Window by 2 laps to maintain track position against Car 16.
+                            </p>
+</div>
+<div class="bg-surface-container p-3 rounded border-l-2 border-primary-container">
+<div class="flex justify-between items-center mb-1">
+<span class="font-label-xs text-label-xs text-outline">NEW PIT WINDOW</span>
+<span class="font-telemetry-data text-telemetry-data text-primary">LAP 26-28</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="font-label-xs text-label-xs text-outline">TARGET OUT-LAP</span>
+<span class="font-telemetry-data text-telemetry-data text-on-surface">P4 (CLEAN AIR)</span>
+</div>
+</div>
+</div>
+<div class="flex flex-col gap-2 mt-4">
+<button class="w-full py-2 bg-primary/10 border border-primary text-primary font-call-to-action text-call-to-action rounded hover:bg-primary/20 transition-all flex justify-center items-center gap-2">
+<span class="material-symbols-outlined text-sm">check_circle</span>
+                            ACCEPT PLAN ALPHA
+                        </button>
+<button class="w-full py-2 bg-surface-container border border-outline-variant text-on-surface-variant font-label-xs text-label-xs rounded hover:border-outline hover:text-on-surface transition-all">
+                            MANUAL OVERRIDE
+                        </button>
+</div>
+</div>
+</section>
+</div>
+<!-- Bottom: Multi-Lap Trend Graph (Full Width) -->
+<section class="glass-panel rounded-lg tactical-border flex flex-col h-64 overflow-hidden mt-2">
+<div class="p-2 border-b border-outline-variant/30 flex justify-between items-center bg-surface-container-low/50">
+<h3 class="font-label-xs text-label-xs text-outline flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">water_drop</span>
+                    LAP WETNESS SCORE TREND
+                </h3>
+<span class="font-label-xs text-label-xs text-outline">LAPS 30-42</span>
+</div>
+<div class="flex-grow p-container-padding flex items-end gap-1 relative overflow-hidden">
+<!-- Abstract graph bars using flex layout -->
+<div class="absolute left-0 bottom-0 w-full h-[1px] bg-outline-variant/30 mb-[24px]"></div>
+<!-- X-Axis Labels -->
+<div class="absolute left-0 bottom-1 w-full flex justify-between px-container-padding font-label-xs text-label-xs text-outline/50">
+<span>30</span><span>35</span><span>40</span>
+</div>
+<!-- Simulated Bars -->
+<div class="w-full h-[calc(100%-28px)] flex items-end gap-1 mt-1 z-10 px-2 pb-6">
+<div class="flex-1 bg-primary/20 hover:bg-primary/40 rounded-t transition-colors h-[10%]" title="Lap 30"></div>
+<div class="flex-1 bg-primary/20 hover:bg-primary/40 rounded-t transition-colors h-[12%]" title="Lap 31"></div>
+<div class="flex-1 bg-primary/20 hover:bg-primary/40 rounded-t transition-colors h-[15%]" title="Lap 32"></div>
+<div class="flex-1 bg-primary/30 hover:bg-primary/50 rounded-t transition-colors h-[25%]" title="Lap 33"></div>
+<div class="flex-1 bg-primary-container/40 hover:bg-primary-container/60 rounded-t transition-colors h-[40%]" title="Lap 34"></div>
+<div class="flex-1 bg-primary-container/50 hover:bg-primary-container/70 rounded-t transition-colors h-[60%]" title="Lap 35"></div>
+<div class="flex-1 bg-primary-container/60 hover:bg-primary-container/80 rounded-t transition-colors h-[75%] border-t-2 border-primary" title="Lap 36 - Rain Starts"></div>
+<div class="flex-1 bg-primary-container/70 hover:bg-primary-container/90 rounded-t transition-colors h-[85%]" title="Lap 37"></div>
+<div class="flex-1 bg-primary-container/80 hover:bg-primary-container rounded-t transition-colors h-[90%]" title="Lap 38"></div>
+<div class="flex-1 bg-primary-container/80 hover:bg-primary-container rounded-t transition-colors h-[95%]" title="Lap 39"></div>
+<div class="flex-1 bg-primary-container/90 hover:bg-primary-container rounded-t transition-colors h-[100%]" title="Lap 40"></div>
+<div class="flex-1 bg-primary-container/90 hover:bg-primary-container rounded-t transition-colors h-[98%]" title="Lap 41"></div>
+<!-- Current Lap (pulsing) -->
+<div class="flex-1 bg-primary-container border-2 border-primary rounded-t animate-pulse h-[95%]" title="Lap 42 (Current)"></div>
+</div>
+</div>
+</section>
+</main>
+<!-- Footer (Shared Component) -->
+<footer class="fixed bottom-0 right-0 w-full md:w-[calc(100%-256px)] h-12 bg-surface-container-lowest/95 backdrop-blur-lg border-t border-glass-stroke shadow-[0_-4px_12px_rgba(0,0,0,0.5)] flex items-center justify-between px-gutter z-50">
+<span class="font-data-label text-data-label font-label-caps text-label-caps text-on-tertiary-container">CREW_AI RADIO | ACTIVE UPLINK</span>
+<div class="flex gap-4">
+<a class="text-tertiary-fixed font-bold underline text-data-label transition-all duration-300 hover:text-tertiary-fixed-dim" href="#">STRATEGY_ALPHA</a>
+<a class="text-data-label text-data-label transition-all duration-300 hover:text-tertiary-fixed-dim" href="#">SAFETY_CAR_PROCEDURE</a>
+<a class="text-data-label text-data-label transition-all duration-300 hover:text-tertiary-fixed-dim" href="#">FUEL_MAP_7</a>
+</div>
+</footer>
+</body></html>

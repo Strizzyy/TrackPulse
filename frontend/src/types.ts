@@ -77,6 +77,8 @@ export interface Recommendation {
 
 export interface StrategistReport {
   session_id: string;
+  circuit_id: string;
+  circuit_name: string;
   current_condition: CurrentCondition;
   frames: FrameResult[];
   dropped_non_racing_frames: number;
@@ -185,6 +187,11 @@ export interface LapSummary {
   frame_count: number;
   image_url: string;
   corners: CornerSummary[];
+  // False for a sparse lap (almost always a partial lap caught at the tail
+  // of an upload whose length isn't an exact multiple of the lap time) --
+  // excluded from the trend fit and from seeding "current conditions", but
+  // still shown here for transparency.
+  complete: boolean;
 }
 
 export interface SessionTrend {
@@ -209,6 +216,41 @@ export interface SessionReport {
   forecast: Forecast;
   safety_car_risk: SafetyCarRisk;
   recommendation: Recommendation;
+}
+
+export interface CircuitDetailCorner {
+  name: string;
+  number: number;
+  distance_m: number;
+  start_pct: number;
+  end_pct: number;
+}
+
+// The full per-circuit record from GET /api/circuits/{id} -- everything
+// build_circuit_data.py measured offline from real FastF1 race sessions.
+// Static (no video needed), so it can be shown the moment a circuit is
+// picked, before the user chooses a mode or loads any footage.
+export interface CircuitDetail {
+  circuit_id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  source: string;
+  race_laps: number | null;
+  lap_distance_m: number | null;
+  avg_lap_time_sec: number | null;
+  pit_loss_sec: number | null;
+  rain_frequency_pct: number | null;
+  degradation: Record<string, CompoundDegradation>;
+  track_evolution_sec_per_lap: number | null;
+  corners: CircuitDetailCorner[];
+  corner_count: number;
+  corner_source: string;
+  sessions_analyzed: number | null;
+  sc_or_vsc_rate_pct: number | null;
+  avg_first_deployment_lap: number | null;
+  degradation_confidence: "high" | "low" | null;
+  degradation_note: string | null;
 }
 
 export interface TrackCorner {

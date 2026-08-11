@@ -9,15 +9,15 @@ interface Props {
 }
 
 const URGENCY_TEXT: Record<string, string> = {
-  low: "text-emerald-300",
-  medium: "text-amber-300",
-  high: "text-red-300",
+  low: "text-primary-fixed-dim",
+  medium: "text-tertiary-fixed-dim",
+  high: "text-secondary-container",
 };
 
 const URGENCY_CHIP: Record<string, string> = {
-  low: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
-  medium: "border-amber-500/40 bg-amber-500/10 text-amber-300",
-  high: "border-f1-red/60 bg-f1-red/10 text-red-300",
+  low: "border-primary-fixed-dim/40 bg-primary-fixed-dim/10 text-primary-fixed-dim",
+  medium: "border-tertiary-fixed-dim/40 bg-tertiary-fixed-dim/10 text-tertiary-fixed-dim",
+  high: "border-secondary-container/50 bg-secondary-container/10 text-secondary-container",
 };
 
 export default function RecommendationPanel({
@@ -34,25 +34,28 @@ export default function RecommendationPanel({
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
       <Panel
         title="Pit wall call"
+        tactical
         right={
           <span
-            className={`rounded-xs border px-2 py-0.5 text-xs font-bold uppercase tracking-wider ${urgencyChip}`}
+            className={`rounded-xs border px-2 py-0.5 font-mono-data text-[11px] font-bold uppercase tracking-wider ${urgencyChip}`}
           >
             {recommendation.urgency} urgency
           </span>
         }
       >
-        <div className={`text-xl font-black italic uppercase leading-tight ${urgencyText}`}>
+        <div className={`font-headline text-xl font-black uppercase leading-tight ${urgencyText}`}>
           {recommendation.tire_call}
         </div>
         <dl className="mt-3 text-sm">
-          <div className="flex justify-between border-b border-carbon-800 py-2">
-            <dt className="uppercase tracking-wider text-neutral-500">Compound</dt>
-            <dd className="font-semibold uppercase text-neutral-200">{recommendation.compound}</dd>
+          <div className="flex justify-between border-b border-outline-variant/20 py-2">
+            <dt className="font-mono-data text-[11px] uppercase tracking-wider text-outline">Compound</dt>
+            <dd className="font-mono-data font-semibold uppercase text-on-surface">
+              {recommendation.compound}
+            </dd>
           </div>
           <div className="flex justify-between py-2">
-            <dt className="uppercase tracking-wider text-neutral-500">Pit window</dt>
-            <dd className="font-mono tabular-nums text-neutral-200">
+            <dt className="font-mono-data text-[11px] uppercase tracking-wider text-outline">Pit window</dt>
+            <dd className="font-mono-data tabular-nums text-on-surface">
               L{recommendation.pit_window_laps.join(" – L")}
             </dd>
           </div>
@@ -61,30 +64,30 @@ export default function RecommendationPanel({
 
       <Panel title="Safety car risk">
         <div className="flex items-baseline gap-2">
-          <span className="font-mono text-4xl font-bold tabular-nums text-white">
+          <span className="font-mono-data text-4xl font-bold tabular-nums text-secondary-container">
             {safetyCarRisk.risk_pct}
           </span>
-          <span className="text-base text-neutral-500">%</span>
+          <span className="text-base text-on-surface-variant">%</span>
           {safetyCarRisk.expected_first_sc_lap !== null && (
-            <span className="ml-auto text-right text-xs uppercase tracking-wider text-neutral-500">
+            <span className="ml-auto text-right font-mono-data text-[11px] uppercase tracking-wider text-outline">
               First deployment
-              <span className="ml-1 font-mono text-sm font-bold tabular-nums text-neutral-200">
+              <span className="ml-1 font-mono-data text-sm font-bold tabular-nums text-on-surface">
                 ~L{Math.round(safetyCarRisk.expected_first_sc_lap)}
               </span>
               {safetyCarRisk.sc_window_laps && (
-                <span className="ml-1 font-mono tabular-nums text-neutral-400">
+                <span className="ml-1 font-mono-data tabular-nums text-on-surface-variant">
                   (L{safetyCarRisk.sc_window_laps[0]}–L{safetyCarRisk.sc_window_laps[1]})
                 </span>
               )}
             </span>
           )}
         </div>
-        <div className="mt-3 h-2 w-full rounded-full bg-carbon-700">
-          <div className="h-2 rounded-full bg-f1-red" style={{ width: `${riskPct}%` }} />
+        <div className="mt-3 h-2 w-full rounded-full bg-surface-container-high">
+          <div className="h-2 rounded-full bg-secondary-container" style={{ width: `${riskPct}%` }} />
         </div>
-        <p className="mt-3 text-sm text-neutral-500">{safetyCarRisk.rationale}</p>
+        <p className="mt-3 text-sm text-on-surface-variant">{safetyCarRisk.rationale}</p>
         {safetyCarRisk.sc_timing_note && (
-          <p className="mt-1.5 text-sm text-neutral-500">{safetyCarRisk.sc_timing_note}</p>
+          <p className="mt-1.5 text-sm text-on-surface-variant">{safetyCarRisk.sc_timing_note}</p>
         )}
       </Panel>
 
@@ -92,17 +95,17 @@ export default function RecommendationPanel({
         title="Radio call"
         right={
           <span
-            className={`rounded-xs border px-2 py-0.5 text-xs font-bold uppercase tracking-wider ${
+            className={`rounded-xs border px-2 py-0.5 font-mono-data text-[11px] font-bold uppercase tracking-wider ${
               agentSynthesisUsed
-                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                : "border-carbon-600 bg-carbon-800 text-neutral-400"
+                ? "border-tertiary-fixed-dim/40 bg-tertiary-fixed-dim/10 text-tertiary-fixed-dim"
+                : "border-outline-variant/40 bg-surface-container text-on-surface-variant"
             }`}
           >
             {agentSynthesisUsed ? "CrewAI agent" : "Rule-based"}
           </span>
         }
       >
-        <p className="text-base italic leading-relaxed text-neutral-200">"{strategistNote}"</p>
+        <p className="font-body text-base italic leading-relaxed text-on-surface">"{strategistNote}"</p>
       </Panel>
     </div>
   );
