@@ -13,11 +13,18 @@ WET_EARLINESS = 0.65
 DAMP_EARLINESS = 0.80
 WORSENING_EARLINESS = 0.90
 
+# Wetness per LAP above which the track counts as actively worsening.
+WORSENING_SLOPE = 0.01
 
-def get_sc_risk(recent_slope: float, current_score: float, circuit: Optional[Dict] = None) -> Dict:
+
+def get_sc_risk(slope_per_lap: float, current_score: float, circuit: Optional[Dict] = None) -> Dict:
     """`circuit` is a per-circuit record from app/data/circuits/. When omitted
-    this falls back to the original Silverstone-only sc_stats.json, so the
-    existing single-lap endpoint keeps behaving exactly as before."""
+    this falls back to the original Silverstone-only sc_stats.json.
+
+    `slope_per_lap` is wetness per LAP. The WORSENING_SLOPE threshold below has
+    always been a per-lap figure, but the single-lap endpoint used to hand this
+    a per-second slope -- ~90x too small, so "conditions worsening" could never
+    fire on that path no matter how fast the track was filling up."""
     if circuit is not None:
         stats = circuit
     else:
@@ -32,7 +39,7 @@ def get_sc_risk(recent_slope: float, current_score: float, circuit: Optional[Dic
     if current_score > 0.5:
         risk += 15
         rationale_bits.append("Track currently wet, which historically raises incident risk.")
-    if recent_slope > 0.01:
+    if slope_per_lap > WORSENING_SLOPE:
         risk += 10
         rationale_bits.append("Conditions worsening lap on lap.")
 
@@ -44,11 +51,11 @@ def get_sc_risk(recent_slope: float, current_score: float, circuit: Optional[Dic
         "rationale": " ".join(rationale_bits),
         "sessions_analyzed": stats.get("sessions_analyzed"),
     }
-    result.update(_deployment_timing(stats, recent_slope, current_score))
+    result.update(_deployment_timing(stats, slope_per_lap, current_score))
     return result
 
 
-def _deployment_timing(stats: Dict, recent_slope: float, current_score: float) -> Dict:
+def _deployment_timing(stats: Dict, slope_per_lap: float, current_score: float) -> Dict:
     """*When*, not just whether -- "SC/VSC risk 86%" is not something a
     strategist can act on, but "expect the first one around lap 15, and
     historically it's lap 22 in the dry" is.
@@ -68,7 +75,7 @@ def _deployment_timing(stats: Dict, recent_slope: float, current_score: float) -
     elif current_score > 0.35:
         factor *= DAMP_EARLINESS
         reasons.append("damp track")
-    if recent_slope > 0.01:
+    if slope_per_lap > WORSENING_SLOPE:
         factor *= WORSENING_EARLINESS
         reasons.append("conditions worsening")
 

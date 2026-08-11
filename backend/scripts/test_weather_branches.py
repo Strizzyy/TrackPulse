@@ -30,7 +30,7 @@ failures = 0
 for name, mm, prob, current, slope, expect in CASES:
     result = weather.project_condition(
         current_score=current,
-        recent_slope=slope,
+        slope_per_lap=slope,
         precipitation_mm=mm,
         num_laps=5,
         avg_lap_time_sec=90.5,

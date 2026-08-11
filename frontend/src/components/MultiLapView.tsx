@@ -48,8 +48,14 @@ export default function MultiLapView({ session }: Props) {
             </div>
             <div className="font-mono-data text-sm font-semibold text-primary-fixed-dim">
               {session.trend.slope_per_lap >= 0 ? "+" : ""}
-              {session.trend.slope_per_lap}/lap · {session.trend.direction}
+              {session.trend.slope_per_lap}/lap measured · {session.trend.direction}
             </div>
+            {session.trend.net_slope_per_lap !== undefined && (
+              <div className="font-mono-data text-[10px] text-outline">
+                net {session.trend.net_slope_per_lap >= 0 ? "+" : ""}
+                {session.trend.net_slope_per_lap}/lap incl. weather — drives the call
+              </div>
+            )}
           </div>
         </div>
       </div>

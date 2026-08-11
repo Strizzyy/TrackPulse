@@ -50,7 +50,14 @@ export default function SingleLapView({ report }: Props) {
           />
           <DataRow label="Wetness score" value={report.current_condition.wetness_score.toFixed(2)} />
           <DataRow label="Trend" value={report.trend.direction} />
-          <DataRow label="Trend slope" value={report.trend.slope.toFixed(4)} />
+          <DataRow
+            label="Measured slope"
+            value={`${report.trend.slope >= 0 ? "+" : ""}${report.trend.slope.toFixed(4)}/lap`}
+          />
+          <DataRow
+            label="Net (incl. weather)"
+            value={`${report.trend.net_slope >= 0 ? "+" : ""}${report.trend.net_slope.toFixed(4)}/lap`}
+          />
           <DataRow label="Rain probability" value={`${report.forecast.rain_probability_pct}%`} />
           <DataRow label="Avg lap time" value={`${report.forecast.avg_lap_time_sec}s`} />
           <DataRow label="Frames analyzed" value={report.frames.length} />

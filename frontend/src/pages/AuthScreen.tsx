@@ -134,11 +134,6 @@ export default function AuthScreen() {
             </button>
           </form>
 
-          <p className="mt-3 text-center text-[11px] leading-relaxed text-outline">
-            Accounts are stored only in this browser (no server-side account system exists yet) --
-            good enough to keep your own run history separate, not a secure login.
-          </p>
-
           <div className="my-5 flex items-center gap-3">
             <span className="h-px flex-1 bg-outline-variant/50" />
             <span className="font-mono-data text-[10px] uppercase tracking-widest text-outline">or</span>
@@ -155,7 +150,7 @@ export default function AuthScreen() {
         </div>
 
         <p className="text-center text-[11px] uppercase tracking-widest text-outline/70">
-          Real vision, weather and race-history data underneath -- see CONTEXT.md for what's real vs. modelled.
+          Real vision, weather and race-history data underneath.
         </p>
       </div>
     </div>

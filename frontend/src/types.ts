@@ -26,7 +26,12 @@ export interface CornerSummary {
 }
 
 export interface Trend {
+  /** Measured visual trend, wetness per LAP -- same figure as
+   * Forecast.measured_slope. It was per-second until the units were unified. */
   slope: number;
+  /** Measured + weather, i.e. Forecast.adjusted_slope. `direction` comes from
+   * THIS, not from `slope`, and so do the tyre call and the SC risk. */
+  net_slope: number;
   direction: "drying" | "wetting" | "stable";
   summary: string;
 }
@@ -50,6 +55,9 @@ export interface Forecast {
   // curve bends: measured visual slope + weather adjustment, per lap.
   measured_slope: number;
   weather_adjustment: number;
+  // Their sum, and the direction every downstream decision is taken from.
+  adjusted_slope: number;
+  projected_direction: "drying" | "wetting" | "stable";
   forecast_rationale: string;
   avg_lap_time_sec: number;
   reference_frames: ReferenceFrame[];
@@ -195,8 +203,14 @@ export interface LapSummary {
 }
 
 export interface SessionTrend {
+  /** Measured lap-over-lap trend. */
   slope_per_lap: number;
+  /** Measured + weather. `direction` comes from this. */
+  net_slope_per_lap?: number;
   direction: string;
+  /** Direction of the measured trend alone, before the weather adjustment --
+   * `summary` describes this one, with its own numbers alongside it. */
+  measured_direction?: string;
   laps_analyzed: number;
   total_change?: number;
   summary: string;

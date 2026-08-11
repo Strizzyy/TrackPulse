@@ -165,12 +165,26 @@ async def analyze_session(
     current_lap = usable[-1]
     session_trend = session_module.compute_session_trend(usable)
 
-    for f in enriched:
-        f["label"] = trend_module.label_for_score(f["wetness_score"], session_trend["slope_per_lap"])
-
     forecast_raw = await weather.get_precipitation_forecast(
         minutes_ahead=15, lat=circuit.get("lat", weather.SILVERSTONE_LAT), lon=circuit.get("lon", weather.SILVERSTONE_LON)
     )
+    # Same rule as the single-lap path: decisions are taken on the NET slope
+    # (measured trend + weather), never on the raw measured trend alone.
+    weather_term = weather.weather_adjustment(
+        forecast_raw["precipitation_mm"], forecast_raw.get("precipitation_probability_pct")
+    )
+    net_slope = session_trend["slope_per_lap"] + weather_term["adjustment"]
+    direction = trend_module.direction_for_slope(net_slope)
+    session_trend["net_slope_per_lap"] = round(net_slope, 4)
+    # compute_session_trend()'s own `direction`/`summary` describe the measured
+    # lap-over-lap trend and keep their own numbers alongside them; this is the
+    # direction everything acts on.
+    session_trend["measured_direction"] = session_trend["direction"]
+    session_trend["direction"] = direction
+
+    for f in enriched:
+        f["label"] = trend_module.label_for_score(f["wetness_score"], net_slope)
+
     forecast = weather.project_condition(
         current_lap["avg_wetness"],
         # Already per-lap -- no conversion needed here, unlike the single-lap path.
@@ -181,11 +195,13 @@ async def analyze_session(
         precipitation_probability_pct=forecast_raw.get("precipitation_probability_pct"),
     )
 
-    sc_risk = history.get_sc_risk(
-        session_trend["slope_per_lap"], current_lap["avg_wetness"], circuit=circuit
-    )
+    sc_risk = history.get_sc_risk(net_slope, current_lap["avg_wetness"], circuit=circuit)
     recommendation = strategy.recommend(
-        current_lap["avg_wetness"], session_trend["direction"], session_trend["slope_per_lap"]
+        current_lap["avg_wetness"],
+        direction,
+        net_slope,
+        projected_wetness=forecast["projected_wetness"],
+        rain_probability_pct=forecast["rain_probability_pct"],
     )
 
     return {
@@ -354,27 +370,33 @@ async def analyze(video: UploadFile = File(...), circuit_id: str = Form("silvers
     if not enriched:
         raise HTTPException(422, "No racing footage detected in this video -- got title cards/graphics only")
 
-    trend_stats = trend_module.compute_trend(enriched)
-    for f in enriched:
-        f["label"] = trend_module.label_for_score(f["wetness_score"], trend_stats["recent_slope"])
-
-    corners_summary = trend_module.build_corner_summary(enriched)
-    current = trend_module.current_condition_summary(enriched, trend_stats["recent_slope"])
+    # ONE slope drives every panel below: the whole-lap fit, in wetness per lap,
+    # plus the weather adjustment. Labels, current condition, the forecast curve,
+    # SC risk and the tyre call previously split across different numbers -- first
+    # two different fits of the measured trend, then the raw measured trend for the
+    # decisions and the net for the forecast. Both splits produced calls that
+    # contradicted the curve drawn directly above them.
+    trend_stats = trend_module.compute_trend(enriched, avg_lap_time_sec)
+    measured_slope = trend_stats["slope_per_lap"]
 
     forecast_raw = await weather.get_precipitation_forecast(minutes_ahead=15, lat=lat, lon=lon)
-    # compute_trend() measures slope in wetness per SECOND, but
-    # project_condition() applies its slope once per LAP. Passing the raw value
-    # under-weighted the measured trend by roughly the lap length (~90x).
-    #
-    # Use the whole-lap fit, not recent_slope: recent_slope is fitted over a
-    # 15-second window (about five frames), and multiplying that up by a lap
-    # length amplifies its noise just as much as its signal -- it produced a
-    # +0.26/lap "trend" on a clip whose overall slope is flat. The full-lap fit
-    # is the most stable per-lap rate a single lap of footage can support.
-    slope_per_lap = trend_stats["slope"] * avg_lap_time_sec
+    weather_term = weather.weather_adjustment(
+        forecast_raw["precipitation_mm"], forecast_raw.get("precipitation_probability_pct")
+    )
+    # Net = what the track is actually projected to do. This, not the raw
+    # measured slope, is what everything downstream decides on.
+    net_slope = measured_slope + weather_term["adjustment"]
+    direction = trend_module.direction_for_slope(net_slope)
+
+    for f in enriched:
+        f["label"] = trend_module.label_for_score(f["wetness_score"], net_slope)
+
+    corners_summary = trend_module.build_corner_summary(enriched)
+    current = trend_module.current_condition_summary(enriched, net_slope)
+
     forecast = weather.project_condition(
         current["wetness_score"],
-        slope_per_lap,
+        measured_slope,
         forecast_raw["precipitation_mm"],
         num_laps=10,
         avg_lap_time_sec=avg_lap_time_sec,
@@ -385,11 +407,15 @@ async def analyze(video: UploadFile = File(...), circuit_id: str = Form("silvers
         forecast["projected_wetness"], forecast["horizon_laps"], enriched
     )
 
-    sc_risk = history.get_sc_risk(
-        trend_stats["recent_slope"], current["wetness_score"], circuit=history_circuit
+    sc_risk = history.get_sc_risk(net_slope, current["wetness_score"], circuit=history_circuit)
+    recommendation = strategy.recommend(
+        current["wetness_score"],
+        direction,
+        net_slope,
+        projected_wetness=forecast["projected_wetness"],
+        rain_probability_pct=forecast["rain_probability_pct"],
     )
-    recommendation = strategy.recommend(current["wetness_score"], trend_stats["direction"], trend_stats["recent_slope"])
-    trend_summary = trend_module.trend_summary_text(trend_stats["direction"], corners_summary)
+    trend_summary = trend_module.trend_summary_text(direction, corners_summary)
 
     # Chief Strategist: one LLM call over the already-computed signals above.
     # Runs in a thread since crew.kickoff() is blocking; falls back to the
@@ -428,8 +454,15 @@ async def analyze(video: UploadFile = File(...), circuit_id: str = Form("silvers
         "dropped_non_racing_frames": dropped_non_racing,
         "corners": corners_summary,
         "trend": {
-            "slope": round(trend_stats["slope"], 3),
-            "direction": trend_stats["direction"],
+            # Per LAP, matching forecast.measured_slope. This used to be the
+            # per-SECOND figure sitting beside a direction computed from a
+            # different fit entirely, so the panel could show "drying" above a
+            # positive number.
+            "slope": round(measured_slope, 4),
+            # Measured + weather, and the only direction shown anywhere: it is
+            # what the tyre call, SC risk and forecast curve are all taken from.
+            "net_slope": round(net_slope, 4),
+            "direction": direction,
             "summary": trend_summary,
         },
         "forecast": forecast,

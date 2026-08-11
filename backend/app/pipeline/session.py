@@ -17,15 +17,11 @@ import numpy as np
 
 from app.pipeline import trend as trend_module
 
-# Per-LAP epsilon. trend.SLOPE_EPS (0.01) is calibrated per SECOND, so it can't
-# be reused here -- 0.01/lap is roughly 0.0001/s.
-#
-# Scale comes from the label cutoffs: wet (0.65) to dry (0.35) is a 0.3 swing.
-# A track making that transition over a 35-lap stint is moving ~0.009/lap, so
-# anything at or above that is a real, race-relevant trend. An earlier value of
-# 0.02/lap was far too coarse -- it called a measured -0.014/lap "stable", which
-# extrapolates to a complete wet-to-dry change inside half a race distance.
-LAP_SLOPE_EPS = 0.008
+# Re-exported, not redefined: trend.py owns the one slope threshold now that
+# every slope crossing a module boundary is per-lap. The single-lap path used
+# to carry its own per-second epsilon, and the two disagreed about what
+# "drying" meant.
+LAP_SLOPE_EPS = trend_module.LAP_SLOPE_EPS
 
 # A lap video's length is rarely an exact multiple of lap_duration_sec, so
 # segment_laps() almost always produces a trailing lap with just a couple of
@@ -111,8 +107,8 @@ def usable_laps(lap_summaries: List[Dict]) -> List[Dict]:
 
 def compute_session_trend(lap_summaries: List[Dict]) -> Dict:
     """Slope in wetness per LAP -- directly usable by weather.project_condition,
-    which applies its adjustment once per lap. (The single-lap path has to
-    convert, because compute_trend returns per-second.)"""
+    which applies its adjustment once per lap. trend.compute_trend() reports the
+    same unit for the single-lap path, so both paths speak per-lap throughout."""
     if len(lap_summaries) < 2:
         return {
             "slope_per_lap": 0.0,

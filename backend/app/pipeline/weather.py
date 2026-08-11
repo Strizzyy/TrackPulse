@@ -2,6 +2,8 @@ from typing import Dict, List
 
 import httpx
 
+from app.pipeline import trend
+
 SILVERSTONE_LAT = 52.0786
 SILVERSTONE_LON = -1.0169
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
@@ -62,9 +64,47 @@ def _mean(values: List[float]) -> float:
     return sum(usable) / len(usable) if usable else 0.0
 
 
+def weather_adjustment(
+    precipitation_mm: List[float], precipitation_probability_pct: List[float] = None
+) -> Dict:
+    """The weather's own contribution to the per-lap wetness slope, split out
+    so a caller can compute the NET slope (measured + weather) *before* it
+    decides anything.
+
+    Three-way branch so "raining now", "probably about to rain" and "dry" are
+    distinguishable; previously anything short of measurable rain collapsed
+    into the same drying assumption.
+
+    `note` describes the weather term ONLY. It used to be the whole forecast
+    rationale, which meant the no-rain branch printed "assuming the track keeps
+    drying" underneath a curve that was climbing to fully wet -- the sentence
+    described the -0.01 weather adjustment while the projection was dominated
+    by a much larger measured slope pointing the other way.
+    """
+    rain_mm = _mean(precipitation_mm)
+    rain_prob = _mean(precipitation_probability_pct or [])
+
+    if rain_mm > RAIN_FALLING_MM:
+        adjustment = RAIN_FALLING_ADJUSTMENT
+        note = f"{rain_mm:.2f}mm forecast in the window -- weather pushing the track wetter."
+    elif rain_prob >= RAIN_LIKELY_PCT:
+        adjustment = RAIN_LIKELY_ADJUSTMENT
+        note = f"{rain_prob:.0f}% chance of rain but none falling yet -- weather leaning wet."
+    else:
+        adjustment = DRYING_ADJUSTMENT
+        note = "No meaningful rain signal -- weather alone would dry the track."
+
+    return {
+        "adjustment": adjustment,
+        "note": note,
+        "rain_mm": rain_mm,
+        "rain_probability_pct": rain_prob,
+    }
+
+
 def project_condition(
     current_score: float,
-    recent_slope: float,
+    slope_per_lap: float,
     precipitation_mm: List[float],
     num_laps: int,
     avg_lap_time_sec: float,
@@ -74,24 +114,25 @@ def project_condition(
     is a transparent weighted extrapolation, not a trained model -- keep it
     that way, it's explainable and that's the point.
 
-    Three-way branch so "raining now", "probably about to rain" and "dry" are
-    distinguishable; previously anything short of measurable rain collapsed
-    into the same drying assumption.
+    `slope_per_lap` is the measured visual trend in wetness per LAP, from
+    trend.compute_trend() or session.compute_session_trend() -- both report
+    that unit, and the per-lap adjustments below are only meaningful against it.
     """
-    rain_mm = _mean(precipitation_mm)
-    rain_prob = _mean(precipitation_probability_pct or [])
+    weather_term = weather_adjustment(precipitation_mm, precipitation_probability_pct)
+    rain_mm = weather_term["rain_mm"]
+    rain_prob = weather_term["rain_probability_pct"]
+    lap_adjustment = weather_term["adjustment"]
+    weather_note = weather_term["note"]
 
-    if rain_mm > RAIN_FALLING_MM:
-        lap_adjustment = RAIN_FALLING_ADJUSTMENT
-        rationale = f"{rain_mm:.2f}mm forecast in the window -- track wetting up."
-    elif rain_prob >= RAIN_LIKELY_PCT:
-        lap_adjustment = RAIN_LIKELY_ADJUSTMENT
-        rationale = f"{rain_prob:.0f}% chance of rain but none falling yet -- leaning wet."
-    else:
-        lap_adjustment = DRYING_ADJUSTMENT
-        rationale = "No meaningful rain signal -- assuming the track keeps drying."
+    adjusted_slope = slope_per_lap + lap_adjustment
 
-    adjusted_slope = recent_slope + lap_adjustment
+    projected_direction = trend.direction_for_slope(adjusted_slope)
+    net_phrase = {
+        "wetting": "track wetting up",
+        "drying": "track drying out",
+        "stable": "holding roughly steady",
+    }[projected_direction]
+    rationale = f"{weather_note} Net projection {adjusted_slope:+.3f}/lap -- {net_phrase}."
 
     projected = []
     score = current_score
@@ -105,8 +146,13 @@ def project_condition(
         # A real probability from the API, not mm rescaled. Keep it that way.
         "rain_probability_pct": round(rain_prob, 1),
         "precipitation_mm": round(rain_mm, 2),
-        "measured_slope": round(recent_slope, 4),
+        "measured_slope": round(slope_per_lap, 4),
         "weather_adjustment": lap_adjustment,
+        # The net slope, and the direction every decision downstream is taken
+        # from. Surfaced so the UI can show why a call disagrees with the raw
+        # measured trend rather than looking arbitrary.
+        "adjusted_slope": round(adjusted_slope, 4),
+        "projected_direction": projected_direction,
         "forecast_rationale": rationale,
         "avg_lap_time_sec": avg_lap_time_sec,
     }
