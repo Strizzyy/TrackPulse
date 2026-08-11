@@ -18,10 +18,13 @@ real historical F1 data, and a tire/pit-window recommendation -- synthesized by 
 agent (CrewAI) into a race-engineer-style radio call, with a human strategist meant to
 stay in the loop rather than the AI deciding unilaterally.
 
-Scope decisions already made: **Silverstone only** (no track picker), Python backend +
-TypeScript frontend, footage sourced from real YouTube F1 clips (not a 40k-image trained
-classifier -- there's no such dataset and collecting one wasn't feasible; see "Vision
-calibration" below for what we actually did instead).
+Scope decisions already made: Python backend + TypeScript frontend, footage sourced from
+real YouTube F1 clips (not a 40k-image trained classifier -- there's no such dataset and
+collecting one wasn't feasible; see "Vision calibration" below for what we actually did
+instead). Originally Silverstone-only with no track picker -- that scope decision was
+superseded on 11 Aug 2026: all 5 circuits (Silverstone, Monaco, Spa, Monza, Suzuka) are
+now selectable up front, before choosing single-lap/multi-lap/strategy mode, across all
+three modes (see "For the frontend teammate" below).
 
 ## Architecture
 
@@ -118,13 +121,32 @@ backend/
 frontend/
   src/
     types.ts               # TypeScript mirror of the backend response shape -- SOURCE OF TRUTH for the contract
-    api.ts                  # fetch wrappers: getTrack(), analyzeLap()
-    App.tsx                  # main flow: upload -> render results
+    api.ts                  # fetch wrappers: analyzeLap(), analyzeSession(), planStrategy(), getCircuit(Detail)s()
+    App.tsx                  # circuit -> mode -> load footage flow; auth gate; history recording
+    history.ts               # localStorage run history (per account/guest), capped at 20 entries
+    trackShapes.ts            # stylized per-circuit SVG loop paths -- schematic, not survey-accurate (see below)
+    labelColors.ts            # dry/damp/drying/wet -> color mapping (Apex Control palette)
+    auth/
+      AuthContext.tsx          # localStorage-only signup/login/guest -- NOT a secure backend auth system
+    pages/
+      AuthScreen.tsx            # login/signup/continue-as-guest screen, shown before the app if not authed
     components/
-      TrendChart.tsx          # Recharts: measured wetness + forecast projection
-      CornerStrip.tsx          # per-corner real frame image + label
-      RecommendationPanel.tsx  # tire call, SC risk, radio call (agent vs. fallback badge)
-    labelColors.ts            # dry/damp/drying/wet -> color mapping
+      shell/
+        TopNav.tsx               # brand + circuit picker + account
+        SideNav.tsx               # mode nav (single/multi/strategy) + history + reset
+        Footer.tsx                 # real backend-reachability + CrewAI-agent-active status
+      CircuitIntel.tsx          # SC windows, pit metrics, honest-degradation panel, track map -- shown per circuit
+      TrackMap.tsx                # schematic SVG track loop, real corner markers at real start_pct
+      SingleLapView.tsx          # single-lap report (condition, corners, trend chart, recommendation)
+      MultiLapView.tsx            # multi-lap session (lap strip, corner-analytics table, wetness/lap chart)
+      LapStrip.tsx                  # horizontal strip of real per-lap frame thumbnails
+      CornerAnalyticsTable.tsx      # corner x lap wetness pivot, "est. dry lap" derived from the real trend slope
+      StrategyBoard.tsx           # selectable plan table, local accept/override, "vs optimal" bar
+      HistoryView.tsx             # past runs (this browser only), click to reopen
+      TrendChart.tsx               # Recharts: measured wetness + forecast projection
+      CornerStrip.tsx               # per-corner real frame image + label
+      RecommendationPanel.tsx       # tire call, SC risk, radio call (agent vs. fallback badge)
+      Panel.tsx                      # shared glass/tactical-border panel primitive
 ```
 
 ## API contract
@@ -144,10 +166,16 @@ contract.
 }
 ```
 
-`POST /api/analyze` (multipart, field name `video`) -> full strategist report:
+`POST /api/analyze` (multipart, field name `video`, optional `circuit_id` form field
+defaulting to `"silverstone"`) -> full strategist report. `circuit_id="silverstone"` (the
+default) is pinned byte-identical to the original Silverstone-only behaviour; any other
+circuit ID uses that circuit's real FastF1 corner geometry, lap time and coordinates
+instead of the hand-made `silverstone.json` -- see `circuits.py` / `main.py`'s `analyze()`:
 ```json
 {
   "session_id": "uuid",
+  "circuit_id": "silverstone",
+  "circuit_name": "Silverstone Circuit (GP Layout)",
   "current_condition": { "label": "damp", "wetness_score": 0.45, "image_url": "/media/.../frame_0047.jpg", "timestamp_sec": 89.3 },
   "frames": [ { "frame_index", "timestamp_sec", "corner", "wetness_score", "label", "image_url" }, ... ],
   "dropped_non_racing_frames": 9,
@@ -319,14 +347,25 @@ three score bands; the dangerous silent case (dry + wetting) returns a high-urge
   token, or it gracefully falls back to rule-based text)
 
 **Explicitly not built (known gaps, not bugs):**
-- **Human-in-the-loop accept/override controls.** The recommendation panel is
-  currently display-only. This was planned scope and is the single biggest thing
-  missing from the original "human stays in the loop" pitch. Frontend work.
+- **Human-in-the-loop accept/override controls -- partially addressed.** As of
+  11 Aug 2026, `StrategyBoard.tsx` has selectable plan rows and an Accept/Manual-Override
+  pair, but it's **local UI state only, not persisted anywhere** (no backend endpoint
+  records the decision). If a durable decision log is needed, that part is still unbuilt.
+  The single-lap and multi-lap recommendation panels are still display-only.
 - **Pre-race setup/wing recommendation.** Was flagged as first-to-cut under time
   pressure in the original plan; time went to fixing vision accuracy instead.
-- **Multi-track support.** Silverstone only, by deliberate scope choice.
+- **Real 2D track geometry.** `build_circuit_data.py` only pulls 1D corner *distance*
+  along the lap, never X/Y position telemetry (FastF1's `get_telemetry()` has it, just
+  never fetched). The frontend's `TrackMap.tsx` draws a stylized, labelled-as-schematic
+  loop per circuit with corner markers at their real proportional distance -- the corner
+  count/names/spacing are real, the loop shape is not survey-accurate.
 - Corner/sector percentages in `silverstone.json` are **rough estimates**, not
-  surveyed sector-time data -- see the `note` field in that file.
+  surveyed sector-time data -- see the `note` field in that file. The other 4 circuits'
+  corner data in `app/data/circuits/*.json` IS real (FastF1 `get_circuit_info()`).
+- **No real backend user/account system.** Login/signup (`auth/AuthContext.tsx`) is a
+  real, working loop but stored only in the browser's localStorage -- not secure, doesn't
+  sync across devices. Run history (`history.ts`) is similarly local-only. This was a
+  deliberate scope call (frontend-only shell) for the 11 Aug UI revamp, not an oversight.
 
 **Race strategy layer -- what is measured vs. modelled.** This distinction matters and
 is surfaced in the API response, not just here:
@@ -377,22 +416,38 @@ the simulator is close on race time and roughly half-right on stop strategy.
 
 ## For the frontend teammate
 
-Current state: React + Vite + TypeScript + Tailwind + Recharts. Functional, wired to
-the real backend contract above, no mock data -- but intentionally basic UI/UX (that
-was always meant to be your area to build out).
+Current state (rebuilt 11 Aug 2026): React + Vite + TypeScript + Tailwind v4 + Recharts,
+on a real design system -- **"Apex Control Evolved"**: obsidian (`#050506`) base, glass
+panels (`backdrop-filter: blur`), tactical corner-bracket borders, Racing Cyan / Neon
+Red-Pink / Gold accent palette, Anybody + JetBrains Mono + Hanken Grotesk typefaces,
+Material Symbols icons. Tokens live in `frontend/src/index.css` as a Tailwind v4
+`@theme` block. Sourced from three Google Stitch design exports the user supplied
+(`stitch_trackpulse_ai_race_strategist (1)/(2)/(3)/`, kept in the repo root for
+provenance) -- their example data was fake (a fabricated "Car 16" scenario, an invented
+Monaco SC-window screenshot) and was treated as style reference only; every number the
+app actually shows still comes from the real backend contract above.
 
-What exists: upload flow, current-condition card (with real frame image), trend chart
-with forecast overlay, per-corner strip (each with its real frame image), a
-"predicted condition" section (closest real frame per forecast lap, clearly labeled as
-a reference, not a generated future photo), and a recommendation panel that shows
-whether the LLM agent or the rule-based fallback produced the radio call.
+**Flow**: circuit picked first (top bar, all 5, in every mode -- previously only
+Multi-lap/Strategy had a picker and Single Lap was silently Silverstone-only) → Circuit
+Intel panel appears immediately (SC windows, pit metrics, Honest Degradation, a
+schematic track map with real corner markers) → then single-lap/multi-lap/strategy mode
+→ load footage. Auth (`auth/AuthContext.tsx`) gates the whole app: login/signup/guest,
+**local-only** (see "Explicitly not built" above) -- not a security feature, just enough
+to namespace the local run history (`history.ts`, `HistoryView.tsx`) per identity.
 
 Highest-value next things, roughly in order:
-1. **Human-in-the-loop controls** -- accept/override buttons on the recommendation
-   card, a confirmed-decision log. This is the biggest gap vs. the original pitch.
-2. Visual polish generally -- current styling is functional, not designed.
-3. A real (if stylized) Silverstone track map instead of the corner strip, using
-   `silverstone.json`'s corner list.
+1. **A real 2D track map.** `TrackMap.tsx`'s loop is schematic (see "Explicitly not
+   built"); making it accurate means pulling X/Y telemetry into
+   `build_circuit_data.py` and persisting a real polyline per circuit.
+2. **Persisting the human-in-the-loop decision.** `StrategyBoard.tsx`'s
+   accept/override is real interactive state but local-only -- no backend endpoint
+   records it, and the single-lap/multi-lap recommendation panels are still
+   display-only.
+3. **A real backend account system**, if cross-device history/login actually matters --
+   current auth is intentionally a local-only shell, not a step toward one.
+4. No headless browser was available when this was built, so it was verified via
+   `tsc --noEmit` / `oxlint` / forcing Vite to transform every changed module, **not**
+   an actual screenshot -- do a real visual QA pass before demoing.
 
 Run it: `cd frontend && npm install && npm run dev`. `src/types.ts` is the contract --
 if the backend response shape ever changes, that file (and only that file) needs
