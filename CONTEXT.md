@@ -204,7 +204,13 @@ GET  /api/circuits              -> [{ circuit_id, name, race_laps, avg_lap_time_
                                       pit_loss_sec, sc_or_vsc_rate_pct,
                                       rain_frequency_pct, corner_count }, ...]
 GET  /api/circuits/{id}         -> full circuit record incl. real corners + degradation
-GET  /api/track/silverstone     -> UNCHANGED legacy endpoint, still used by the lap flow
+GET  /api/track/silverstone     -> UNCHANGED legacy endpoint. As of the 11 Aug UI revamp
+                                    the frontend no longer calls this directly (App.tsx
+                                    dropped getTrack() in favour of the circuit picker /
+                                    GET /api/circuits) -- api.ts still exports it, but it's
+                                    dead code on the frontend side. Backend behaviour and
+                                    /api/analyze's own use of silverstone.json (when
+                                    circuit_id="silverstone") are unaffected either way.
 
 POST /api/analyze-session       (multipart: video, circuit_id, lap_duration_sec?, simulated?)
   -> { lap_count, laps[{lap, avg_wetness, label, image_url, corners[]}],
@@ -220,9 +226,14 @@ POST /api/strategy/plan         (multipart: circuit_id, video?, race_laps?)
        circuit_inputs{...} }
 ```
 
-`/api/analyze` is deliberately untouched by all of this -- it stays the
-guaranteed-working demo path, and was verified byte-identical in behaviour afterwards
-(`pov_wet_full.mp4` -> `wet 0.718`, 16 corners, 56 frames).
+`/api/analyze` was deliberately untouched by the Race Weekend Strategist work above -- it
+stayed the guaranteed-working demo path, and was verified byte-identical in behaviour
+afterwards (`pov_wet_full.mp4` -> `wet 0.718`, 16 corners, 56 frames). It WAS extended on
+11 Aug 2026 to accept the optional `circuit_id` described earlier in this section --
+the `circuit_id="silverstone"` default path is pinned byte-identical to that verification
+(re-confirmed live: default call vs. explicit `circuit_id=silverstone` differ only in the
+CrewAI agent's own run-to-run phrasing, every deterministic field identical), so the
+"guaranteed-working demo path" claim still holds for the default case.
 
 Frame images are served as static files under `/media/{session_id}/frames/{filename}` --
 always fetch them relative to the backend origin (`mediaUrl()` in `frontend/src/api.ts`
@@ -308,6 +319,31 @@ Two unit bugs were fixed along the way, both from mixing per-second and per-lap 
   `recent_slope` is fitted over a 15-second window of about five frames, so scaling it
   amplifies its noise as much as its signal and produced a fictitious +0.26/lap trend.
   The whole-lap fit is used instead.
+
+### Partial-lap trend contamination (fixed 11 Aug 2026)
+
+A real bug, found verifying session mode against real footage rather than by
+inspection: any uploaded clip whose length isn't an exact multiple of `lap_duration_sec`
+produces a trailing lap with only 1-2 frames at ~1fps, vs. ~90 for a full lap.
+`compute_session_trend()` was weighting that sparse lap the same as every full lap in
+its linear fit. Measured live: a flat, real 0.27 (dry) lap followed by a 2-frame noise
+tail read as a fabricated **"+0.52/lap wetting"** trend -- which then produced a wrong
+tire call, a wrong safety-car risk, and (via `/api/strategy/plan`) a wrong wet-race
+strategy recommending intermediates on what was actually a dry track.
+
+`pipeline/session.py`'s `usable_laps()` now excludes any lap with fewer than
+`max(5, 0.4 * median_frame_count)` frames from the trend fit and from seeding "current
+conditions" -- both `analyze_session` and `strategy_plan` in `main.py` use the filtered
+list. The excluded lap is still returned in the `laps` array (flagged `"complete":
+false`) so the UI shows it, faded, rather than silently dropping data.
+
+### Weather forecast was Silverstone-only regardless of circuit (fixed 11 Aug 2026)
+
+`weather.get_precipitation_forecast()` had `SILVERSTONE_LAT`/`LON` hardcoded with no
+parameters -- selecting Monaco or Suzuka in Multi-lap Session mode still silently pulled
+Silverstone's rain forecast. Now takes `lat`/`lon` params (default unchanged, so
+`/api/analyze`'s Silverstone-only default path is unaffected); `main.py` passes the
+selected circuit's real coordinates for `/api/analyze-session`.
 
 ## Trend validation and the rule-engine fix (10 Aug 2026)
 
