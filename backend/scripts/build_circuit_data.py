@@ -44,12 +44,15 @@ YEARS = range(2019, 2026)
 # from ~18s to ~24s, wet-prone (Spa) vs reliably dry (Monza), and Monaco where
 # track position beats strategy outright. If the optimiser is working, its
 # output should look visibly different across these five.
+# Events are FULL official GP names, never location shorthand: FastF1's fuzzy
+# event lookup silently corrected "Spa" to the SPANISH Grand Prix, which filled
+# spa.json with Barcelona data (4.6km lap, 14 corners) for every signal.
 CIRCUITS = [
-    {"id": "silverstone", "event": "Silverstone", "name": "Silverstone Circuit", "lat": 52.0786, "lon": -1.0169},
-    {"id": "monaco", "event": "Monaco", "name": "Circuit de Monaco", "lat": 43.7347, "lon": 7.4206},
-    {"id": "spa", "event": "Spa", "name": "Circuit de Spa-Francorchamps", "lat": 50.4372, "lon": 5.9714},
-    {"id": "monza", "event": "Monza", "name": "Autodromo Nazionale Monza", "lat": 45.6156, "lon": 9.2811},
-    {"id": "suzuka", "event": "Suzuka", "name": "Suzuka International Racing Course", "lat": 34.8431, "lon": 136.5407},
+    {"id": "silverstone", "event": "British Grand Prix", "name": "Silverstone Circuit", "lat": 52.0786, "lon": -1.0169},
+    {"id": "monaco", "event": "Monaco Grand Prix", "name": "Circuit de Monaco", "lat": 43.7347, "lon": 7.4206},
+    {"id": "spa", "event": "Belgian Grand Prix", "name": "Circuit de Spa-Francorchamps", "lat": 50.4372, "lon": 5.9714},
+    {"id": "monza", "event": "Italian Grand Prix", "name": "Autodromo Nazionale Monza", "lat": 45.6156, "lon": 9.2811},
+    {"id": "suzuka", "event": "Japanese Grand Prix", "name": "Suzuka International Racing Course", "lat": 34.8431, "lon": 136.5407},
 ]
 
 SC_STATUS_CODES = {"4", "6", "7"}
@@ -117,6 +120,161 @@ def corner_percentages(session):
             }
         )
     return out, round(lap_distance, 1)
+
+
+def enrich_corners(session, corners, window_m=40.0):
+    """Real per-corner speed character from the fastest lap's telemetry: apex
+    (minimum) speed and the gear at that point, within +/-window_m of the
+    corner's marked distance, plus a coarse slow/medium/fast class for
+    display. One driver's fastest lap, so indicative rather than a sector
+    record -- same caveat as the racing-line outline."""
+    if not corners:
+        return corners
+    try:
+        tel = session.laps.pick_fastest().get_telemetry()
+        dist = tel["Distance"].to_numpy(dtype=float)
+        speed = tel["Speed"].to_numpy(dtype=float)
+        gear = tel["nGear"].to_numpy(dtype=float)
+    except Exception as e:
+        print(f"  corner enrichment failed: {type(e).__name__}: {e}")
+        return corners
+
+    for corner in corners:
+        mask = (dist >= corner["distance_m"] - window_m) & (dist <= corner["distance_m"] + window_m)
+        if not mask.any():
+            continue
+        idx = int(np.argmin(speed[mask]))
+        apex_speed = float(speed[mask][idx])
+        apex_gear = float(gear[mask][idx])
+        corner["apex_speed_kmh"] = int(round(apex_speed))
+        corner["apex_gear"] = int(apex_gear) if apex_gear == apex_gear else None
+        corner["speed_class"] = (
+            "slow" if apex_speed < 120 else "medium" if apex_speed < 200 else "fast"
+        )
+    return corners
+
+
+WEAR_MODEL_NOTE = (
+    "Modelled distribution, not a measurement: frictional work per unit mass "
+    "(braking + traction + lateral v^2*curvature) computed from real fastest-lap "
+    "telemetry and integrated over each corner's lap tile. Shares sum to 1 across "
+    "the lap; multiplying by a compound's measured s/lap spreads real per-lap "
+    "degradation over corners."
+)
+
+
+def corner_wear_model(session, corners):
+    """Per-corner tyre load from the fastest lap's telemetry.
+
+    Tyre wear scales with frictional work, and every term of that is in the
+    telemetry: braking (v*dv/ds where decelerating), traction (where
+    accelerating), and lateral load (v^2 * curvature, curvature from the real
+    X/Y racing line). Integrated over each corner's tile -- the tiles cover
+    the whole lap, so braking zones on the straight before a corner land in
+    that corner's share and the shares sum to 1.
+
+    This distributes wear across corners; it says nothing about the per-lap
+    TOTAL, which stays the measured degradation numbers. Keep the two
+    separate and label this as a model (WEAR_MODEL_NOTE).
+    """
+    if not corners:
+        return corners
+    try:
+        tel = session.laps.pick_fastest().get_telemetry()
+        dist = tel["Distance"].to_numpy(dtype=float)
+        x = tel["X"].to_numpy(dtype=float) / 10.0  # decimetres -> metres
+        y = tel["Y"].to_numpy(dtype=float) / 10.0
+        v = tel["Speed"].to_numpy(dtype=float) / 3.6  # km/h -> m/s
+    except Exception as e:
+        print(f"  wear model failed: {type(e).__name__}: {e}")
+        return corners
+
+    lap_d = float(dist.max())
+    if lap_d <= 0 or len(dist) < 10:
+        return corners
+    step = 5.0
+    grid = np.arange(0.0, lap_d, step)
+    xg = np.interp(grid, dist, x)
+    yg = np.interp(grid, dist, y)
+    vg = np.interp(grid, dist, v)
+
+    # Curvature of the arc-length-parameterised racing line. Position noise
+    # makes raw second derivatives spiky, so smooth lightly and cap at what an
+    # F1 car can physically pull -- anything above the cap is noise, not load.
+    dxs, dys = np.gradient(xg, step), np.gradient(yg, step)
+    ddxs, ddys = np.gradient(dxs, step), np.gradient(dys, step)
+    denom = np.power(dxs**2 + dys**2, 1.5)
+    denom[denom < 1e-9] = 1e-9
+    kappa = np.convolve(np.abs(dxs * ddys - dys * ddxs) / denom, np.ones(5) / 5.0, mode="same")
+
+    a_lat = np.clip(vg**2 * kappa, 0.0, 60.0)
+    a_long = vg * np.gradient(vg, step)
+    brake = np.clip(np.where(a_long < 0, -a_long, 0.0), 0.0, 60.0)
+    traction = np.clip(np.where(a_long > 0, a_long, 0.0), 0.0, 30.0)  # engine-limited
+
+    loads = []
+    for corner in corners:
+        mask = (grid >= corner["start_pct"] * lap_d) & (grid < corner["end_pct"] * lap_d)
+        loads.append(
+            (
+                corner,
+                float(brake[mask].sum() * step),
+                float(traction[mask].sum() * step),
+                float(a_lat[mask].sum() * step),
+            )
+        )
+
+    total = sum(b + t + lat for _, b, t, lat in loads)
+    if total <= 0:
+        return corners
+    for corner, b, t, lat in loads:
+        w = b + t + lat
+        corner["wear_share"] = round(w / total, 4)
+        corner["load_brake_pct"] = round(b / w * 100.0, 1) if w else 0.0
+        corner["load_traction_pct"] = round(t / w * 100.0, 1) if w else 0.0
+        corner["load_lateral_pct"] = round(lat / w * 100.0, 1) if w else 0.0
+    return corners
+
+
+def track_outline(session, n_points=240):
+    """Real 2D track geometry: X/Y position telemetry from the fastest lap,
+    rotated to the official map orientation (FastF1 supplies the angle),
+    resampled uniformly by lap distance, and normalized into a unit box with
+    aspect ratio preserved and Y flipped for SVG.
+
+    Uniform-by-distance resampling means point i sits at lap fraction
+    i/n_points, so the frontend can keep placing corner markers by start_pct
+    along the rendered path. This is the racing line of one fast lap, not the
+    track edges -- at map scale with a wide stroke it reads as the circuit.
+    """
+    tel = session.laps.pick_fastest().get_telemetry()
+    x = tel["X"].to_numpy(dtype=float)
+    y = tel["Y"].to_numpy(dtype=float)
+    dist = tel["Distance"].to_numpy(dtype=float)
+    if len(x) < 10:
+        return None
+
+    try:
+        angle = float(session.get_circuit_info().rotation)
+    except Exception:
+        angle = 0.0
+    rad = np.deg2rad(angle)
+    rx = x * np.cos(rad) - y * np.sin(rad)
+    ry = x * np.sin(rad) + y * np.cos(rad)
+
+    target = np.linspace(0.0, float(dist.max()), n_points, endpoint=False)
+    rx = np.interp(target, dist, rx)
+    ry = np.interp(target, dist, ry)
+
+    ry = -ry  # telemetry Y points up, SVG Y points down
+    span = max(float(rx.max() - rx.min()), float(ry.max() - ry.min()))
+    if span <= 0:
+        return None
+    nx = (rx - rx.min()) / span
+    ny = (ry - ry.min()) / span
+    nx += (1.0 - float(nx.max())) / 2.0  # centre the shorter dimension
+    ny += (1.0 - float(ny.max())) / 2.0
+    return [[round(float(px), 4), round(float(py), 4)] for px, py in zip(nx, ny)]
 
 
 def stint_degradation(laps, total_laps):
@@ -411,6 +569,8 @@ def build(circuit):
             print(f"  skip {year}: {type(e).__name__}: {e}")
             continue
         sessions.append(session)
+        # Loud sanity check -- this is what would have caught Spa->Spanish.
+        print(f"  event resolved: {session.event['EventName']} / {session.event['Location']}")
         laps = session.laps.copy()
         laps["Year"] = year  # keeps stints from different seasons distinct
         all_laps.append(laps)
@@ -429,11 +589,14 @@ def build(circuit):
 
     # Corner geometry needs telemetry (FastF1 derives corner Distance from a
     # reference lap), so it is loaded once for the newest usable year only.
-    corners, lap_distance = None, None
+    corners, lap_distance, outline = None, None, None
     for session in reversed(sessions):
         try:
             tel_session = load_race(session.event.year, circuit["event"], telemetry=True)
             corners, lap_distance = corner_percentages(tel_session)
+            corners = enrich_corners(tel_session, corners)
+            corners = corner_wear_model(tel_session, corners)
+            outline = track_outline(tel_session)
             if corners:
                 print(f"  corners from {session.event.year}: {len(corners)}")
                 break
@@ -461,6 +624,9 @@ def build(circuit):
         "corners": corners or [],
         "corner_count": len(corners or []),
         "corner_source": "fastf1_circuit_info" if corners else "unavailable",
+        "track_outline": outline,
+        "track_outline_source": "fastf1_position_telemetry" if outline else "unavailable",
+        "corner_wear_note": WEAR_MODEL_NOTE if any("wear_share" in c for c in (corners or [])) else None,
     }
     data.update(safety_car_stats(sessions))
 
@@ -480,9 +646,58 @@ def build(circuit):
     return data
 
 
+def patch_telemetry(circuit):
+    """Add the telemetry-derived extras (track_outline, per-corner apex speed
+    and gear) to an already-built JSON without redoing the full multi-year
+    stats pull. Needs only one telemetry-loaded session, so it is minutes,
+    not tens of minutes -- and seconds once the FastF1 cache is warm."""
+    print(f"\n=== {circuit['id']} (telemetry patch) ===")
+    path = os.path.join(OUT_DIR, f"{circuit['id']}.json")
+    if not os.path.exists(path):
+        print("  no built JSON -- run the full build first")
+        return False
+
+    with open(path) as f:
+        data = json.load(f)
+
+    outline = None
+    for year in reversed(YEARS):
+        try:
+            session = fastf1.get_session(year, circuit["event"], "R")
+            session.load(telemetry=True, laps=True, weather=False, messages=False)
+            outline = track_outline(session)
+            if outline:
+                print(f"  outline from {year}: {len(outline)} points")
+                data["corners"] = enrich_corners(session, data.get("corners") or [])
+                data["corners"] = corner_wear_model(session, data["corners"])
+                enriched = sum(1 for c in data["corners"] if "apex_speed_kmh" in c)
+                modelled = sum(1 for c in data["corners"] if "wear_share" in c)
+                data["corner_wear_note"] = WEAR_MODEL_NOTE if modelled else None
+                print(f"  corners enriched: {enriched}/{len(data['corners'])}, wear-modelled: {modelled}")
+                break
+        except Exception as e:
+            print(f"  {year} failed: {type(e).__name__}: {e}")
+    if not outline:
+        print("  NO OUTLINE -- leaving JSON unchanged")
+        return False
+
+    data["track_outline"] = outline
+    data["track_outline_source"] = "fastf1_position_telemetry"
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    print(f"  patched {path}")
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--circuit", help="build a single circuit by id")
+    parser.add_argument(
+        "--telemetry-only",
+        action="store_true",
+        help="only patch telemetry-derived fields (track_outline, corner apex speed/gear) "
+        "into existing circuit JSON (fast; skips the stats pull)",
+    )
     args = parser.parse_args()
 
     os.makedirs(CACHE_DIR, exist_ok=True)
@@ -493,7 +708,8 @@ def main():
         print(f"unknown circuit: {args.circuit}")
         sys.exit(1)
 
-    built = [c["id"] for c in targets if build(c)]
+    step = patch_telemetry if args.telemetry_only else build
+    built = [c["id"] for c in targets if step(c)]
     print(f"\nbuilt {len(built)}/{len(targets)}: {', '.join(built)}")
 
 

@@ -41,8 +41,7 @@ export default function HistoryView({ entries, onOpen, onClear }: Props) {
     >
       {entries.length === 0 ? (
         <p className="py-6 text-center text-sm text-on-surface-variant">
-          Nothing analyzed yet in this browser. Past single-lap, multi-lap and strategy runs will
-          show up here.
+          No runs yet — analyses will appear here.
         </p>
       ) : (
         <div className="flex flex-col divide-y divide-outline-variant/20">

@@ -29,8 +29,7 @@ export default function SingleLapView({ report }: Props) {
             <span className="text-primary-fixed-dim">{report.circuit_name}</span>
           </h1>
           <p className="mt-1 font-mono-data text-[11px] uppercase tracking-widest text-on-surface-variant">
-            {report.frames.length} frames analyzed · {report.dropped_non_racing_frames} non-racing
-            dropped · session {report.session_id.slice(0, 8)}
+            {report.frames.length} frames analyzed · {report.dropped_non_racing_frames} non-racing dropped
           </p>
         </div>
       </div>
@@ -60,8 +59,6 @@ export default function SingleLapView({ report }: Props) {
           />
           <DataRow label="Rain probability" value={`${report.forecast.rain_probability_pct}%`} />
           <DataRow label="Avg lap time" value={`${report.forecast.avg_lap_time_sec}s`} />
-          <DataRow label="Frames analyzed" value={report.frames.length} />
-          <DataRow label="Frames dropped" value={report.dropped_non_racing_frames} />
         </Panel>
 
         <Panel
@@ -106,19 +103,18 @@ export default function SingleLapView({ report }: Props) {
           </div>
         </div>
         <p className="mt-2 border-t border-outline-variant/20 pt-2 text-xs text-on-surface-variant">
-          {report.forecast.forecast_rationale} Projection = measured slope{" "}
-          {report.forecast.measured_slope >= 0 ? "+" : ""}
-          {report.forecast.measured_slope} + weather{" "}
-          {report.forecast.weather_adjustment >= 0 ? "+" : ""}
-          {report.forecast.weather_adjustment} per lap.
+          {report.forecast.forecast_rationale}
         </p>
       </Panel>
 
       <Panel
         title="Forecast references"
         right={
-          <span className="font-mono-data text-xs uppercase tracking-wider text-on-surface-variant">
-            Closest real frames from this lap -- not photos of future laps
+          <span
+            title="Closest real frames from this lap matched to each projected wetness level -- not photos of future laps."
+            className="cursor-help font-mono-data text-xs uppercase tracking-wider text-on-surface-variant"
+          >
+            real frames from this lap
           </span>
         }
         bodyClassName="p-4"

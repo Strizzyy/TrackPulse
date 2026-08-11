@@ -8,7 +8,6 @@ interface Props {
 
 // Analyst-style table: one row per corner with its real representative
 // frame as a thumbnail, the numeric score, a wetness bar, and the label.
-// Swap for a real SVG track map later if there's time.
 export default function CornerStrip({ corners }: Props) {
   return (
     <table className="w-full border-collapse text-sm">

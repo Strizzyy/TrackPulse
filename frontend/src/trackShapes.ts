@@ -1,13 +1,12 @@
 /**
- * Stylized, NOT survey-accurate circuit outlines -- viewBox 0 0 400 260. There
- * is no real 2D track-geometry telemetry stored anywhere in this project
- * (build_circuit_data.py only pulls 1D corner *distance* along the lap, not
- * X/Y position), so a literal-accuracy map isn't something the backend can
- * support yet. These paths exist only to give the real per-corner data (name,
- * distance, count -- all real, from FastF1) a shape to sit on, loosely
- * evoking each circuit's well-known general character (Monaco tight and
- * boxy, Spa long with the Eau Rouge kink, Suzuka's famous figure-eight).
- * Label this "schematic" wherever it's shown -- see TrackMap.tsx.
+ * Stylized, NOT survey-accurate circuit outlines -- viewBox 0 0 400 260.
+ * FALLBACK ONLY: circuit JSON built by build_circuit_data.py now carries
+ * track_outline (real racing-line X/Y from FastF1 position telemetry), and
+ * TrackMap prefers that. These hand-drawn paths remain for circuit JSON built
+ * before the outline pull existed, loosely evoking each circuit's well-known
+ * general character (Monaco tight and boxy, Spa long with the Eau Rouge kink,
+ * Suzuka's famous figure-eight). Label this "schematic" wherever it's shown --
+ * see TrackMap.tsx.
  */
 export const TRACK_SHAPES: Record<string, string> = {
   silverstone:
@@ -23,4 +22,27 @@ export const TRACK_SHAPES: Record<string, string> = {
 
 export function trackShapeFor(circuitId: string): string {
   return TRACK_SHAPES[circuitId] ?? TRACK_SHAPES.silverstone;
+}
+
+/** Fit a unit-box track outline (from circuit JSON track_outline) into a
+ * viewBox with uniform scale (no squash), centered, as an SVG path string. */
+export function outlineToPath(
+  outline: [number, number][] | null | undefined,
+  viewW: number,
+  viewH: number,
+  pad: number,
+): string | null {
+  if (!outline || outline.length < 3) return null;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const [x, y] of outline) {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  const scale = Math.min((viewW - 2 * pad) / (maxX - minX || 1), (viewH - 2 * pad) / (maxY - minY || 1));
+  const offX = (viewW - (maxX - minX) * scale) / 2 - minX * scale;
+  const offY = (viewH - (maxY - minY) * scale) / 2 - minY * scale;
+  const points = outline.map(([x, y]) => `${(x * scale + offX).toFixed(1)} ${(y * scale + offY).toFixed(1)}`);
+  return `M ${points[0]} L ${points.slice(1).join(" L ")} Z`;
 }

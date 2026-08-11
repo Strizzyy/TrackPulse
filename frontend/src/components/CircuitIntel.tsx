@@ -44,20 +44,9 @@ export default function CircuitIntel({ circuit }: Props) {
       </div>
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
-        <Panel
-          title="Tactical map"
-          tactical
-          className="xl:col-span-8"
-          right={
-            <span className="font-mono-data text-xs tabular-nums text-on-surface-variant">
-              {circuit.lap_distance_m ? `${(circuit.lap_distance_m / 1000).toFixed(3)}km` : "—"} /{" "}
-              {circuit.corner_count} corners
-            </span>
-          }
-          bodyClassName="p-4"
-        >
+        <Panel title="Tactical map" tactical className="xl:col-span-8" bodyClassName="p-4">
           <div className="h-[340px] w-full rounded border border-outline-variant/20 bg-surface-container-lowest/60 p-4">
-            <TrackMap circuitId={circuit.circuit_id} corners={circuit.corners} />
+            <TrackMap circuitId={circuit.circuit_id} corners={circuit.corners} outline={circuit.track_outline} />
           </div>
           <div className="mt-4 grid grid-cols-3 gap-4 border-t border-outline-variant/20 pt-4 sm:grid-cols-6">
             <Stat label="Race laps" value={circuit.race_laps ?? "—"} />
@@ -98,34 +87,8 @@ export default function CircuitIntel({ circuit }: Props) {
               </div>
             )}
             <p className="mt-3 text-xs text-on-surface-variant">
-              Base rate from {circuit.sessions_analyzed ?? "—"} real seasons of race history --
-              picking a mode below and reading current conditions sharpens this into a live risk %
-              and expected window.
+              Base rate from {circuit.sessions_analyzed ?? "—"} real seasons of race history.
             </p>
-          </Panel>
-
-          <Panel
-            title="Pit lane metrics"
-            right={<span className="material-symbols-outlined text-[16px] text-outline">timer</span>}
-          >
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded bg-surface-container p-3">
-                <div className="font-mono-data text-[10px] uppercase tracking-widest text-on-surface-variant">
-                  Total pit loss
-                </div>
-                <div className="mt-1 font-headline text-2xl font-bold text-primary-fixed-dim">
-                  {circuit.pit_loss_sec ?? "—"}s
-                </div>
-              </div>
-              <div className="rounded bg-surface-container p-3">
-                <div className="font-mono-data text-[10px] uppercase tracking-widest text-on-surface-variant">
-                  Race distance
-                </div>
-                <div className="mt-1 font-headline text-2xl font-bold text-on-surface">
-                  {circuit.race_laps ?? "—"} laps
-                </div>
-              </div>
-            </div>
           </Panel>
         </div>
       </div>
@@ -134,7 +97,12 @@ export default function CircuitIntel({ circuit }: Props) {
         title="Honest degradation"
         right={
           <span
-            className={`rounded-xs border px-2 py-0.5 font-mono-data text-[11px] font-bold uppercase tracking-wider ${
+            title={
+              usingReferenceDeg
+                ? `${circuit.degradation_note ?? ""} The figures shown are always the real measured values; this badge says whether the simulator trusts them or falls back to a reference curve.`
+                : "Measured degradation is monotonic across compounds -- the strategy simulator runs on these real numbers directly."
+            }
+            className={`cursor-help rounded-xs border px-2 py-0.5 font-mono-data text-[11px] font-bold uppercase tracking-wider ${
               usingReferenceDeg
                 ? "border-tertiary-fixed-dim/40 bg-tertiary-fixed-dim/10 text-tertiary-fixed-dim"
                 : "border-primary-fixed-dim/40 bg-primary-fixed-dim/10 text-primary-fixed-dim"
@@ -162,14 +130,6 @@ export default function CircuitIntel({ circuit }: Props) {
         ) : (
           <p className="text-sm text-on-surface-variant">No degradation data measured for this circuit.</p>
         )}
-        <p className="mt-3 text-xs leading-relaxed text-on-surface-variant">
-          {usingReferenceDeg
-            ? circuit.degradation_note
-            : "Measured degradation is monotonic across compounds -- the strategy simulator runs on these real numbers directly."}{" "}
-          The figures above are always the real measured values either way -- this badge says
-          whether the simulator trusts them or falls back to a reference curve, so a measured
-          number is never silently presented as if it drove the simulation when it didn't.
-        </p>
       </Panel>
     </div>
   );

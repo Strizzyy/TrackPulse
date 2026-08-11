@@ -134,6 +134,10 @@ export default function AuthScreen() {
             </button>
           </form>
 
+          <p className="mt-3 text-center text-[11px] leading-relaxed text-outline">
+            Accounts live in this browser only — not a secure login.
+          </p>
+
           <div className="my-5 flex items-center gap-3">
             <span className="h-px flex-1 bg-outline-variant/50" />
             <span className="font-mono-data text-[10px] uppercase tracking-widest text-outline">or</span>

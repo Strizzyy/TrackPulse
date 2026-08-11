@@ -23,19 +23,18 @@ export default function MultiLapView({ session }: Props) {
     <div className="flex flex-col gap-3">
       {session.simulated && (
         <div className="rounded border border-tertiary-fixed-dim/50 bg-tertiary-fixed-dim/10 px-4 py-3 font-mono-data text-xs font-bold uppercase tracking-wider text-tertiary-fixed-dim">
-          Simulated session -- this footage was constructed for rehearsal, not recorded at a real
-          session
+          Simulated session — rehearsal footage, not a real session
         </div>
       )}
 
       <div className="flex flex-wrap items-end justify-between gap-4 border-b border-surface-container-high pb-3">
         <div>
           <h1 className="font-headline text-3xl font-black uppercase tracking-tighter text-on-surface sm:text-4xl">
-            Multi-lap<span className="text-outline">_</span>Analysis
+            Multi-lap<span className="text-outline">_</span>Session <span className="text-surface-variant">/</span>{" "}
+            <span className="text-primary-fixed-dim">{session.circuit_name}</span>
           </h1>
           <p className="mt-1 font-mono-data text-[11px] uppercase tracking-widest text-on-surface-variant">
-            {session.circuit_name} · {session.lap_count} laps · {session.frames.length} frames ·{" "}
-            {session.dropped_non_racing_frames} dropped
+            {session.lap_count} laps · {session.frames.length} frames · {session.dropped_non_racing_frames} dropped
           </p>
         </div>
         <div className="glass-panel flex items-center gap-3 rounded px-4 py-2">
@@ -62,7 +61,7 @@ export default function MultiLapView({ session }: Props) {
 
       <div>
         <h3 className="mb-2 flex items-center gap-1.5 font-mono-data text-[11px] uppercase tracking-widest text-primary-fixed-dim">
-          <span className="h-1 w-1 rounded-full bg-primary-fixed-dim" /> Lap strip visualization
+          <span className="h-1 w-1 rounded-full bg-primary-fixed-dim" /> Lap strip
         </h3>
         <LapStrip laps={session.laps} activeLap={activeLap} onSelectLap={setActiveLap} />
       </div>
@@ -101,11 +100,7 @@ export default function MultiLapView({ session }: Props) {
               </span>
             </div>
             <p className="mt-2 border-t border-outline-variant/20 pt-2 text-xs text-on-surface-variant">
-              {session.forecast.forecast_rationale} Projection = measured slope{" "}
-              {session.forecast.measured_slope >= 0 ? "+" : ""}
-              {session.forecast.measured_slope} + weather{" "}
-              {session.forecast.weather_adjustment >= 0 ? "+" : ""}
-              {session.forecast.weather_adjustment} per lap.
+              {session.forecast.forecast_rationale}
             </p>
           </Panel>
         </div>

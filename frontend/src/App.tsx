@@ -8,6 +8,8 @@ import SideNav from "./components/shell/SideNav";
 import type { Mode, View } from "./components/shell/SideNav";
 import Footer from "./components/shell/Footer";
 import CircuitIntel from "./components/CircuitIntel";
+import CircuitSelect from "./components/CircuitSelect";
+import CornerDegradation from "./components/CornerDegradation";
 import SingleLapView from "./components/SingleLapView";
 import MultiLapView from "./components/MultiLapView";
 import StrategyBoard from "./components/StrategyBoard";
@@ -15,13 +17,6 @@ import HistoryView from "./components/HistoryView";
 import Panel from "./components/Panel";
 import { appendHistory, clearHistory, loadHistory } from "./history";
 import type { HistoryEntry, HistoryMode } from "./history";
-
-const MODE_BLURBS: Record<Mode, string> = {
-  lap: "Condition, corner map and tyre call from one lap of footage.",
-  session: "Wetness compared lap over lap — a trend over time, not over track position.",
-  strategy:
-    "Simulate every pit plan over a real race distance. Load footage to factor live conditions in.",
-};
 
 const UPLOAD_LABELS: Record<Mode, string> = {
   lap: "Load lap video",
@@ -39,7 +34,8 @@ function Workspace() {
   const identityKey = historyKeyFor(user);
 
   const [circuits, setCircuits] = useState<CircuitSummary[]>([]);
-  const [circuitId, setCircuitId] = useState("silverstone");
+  // null = no circuit picked yet -- the selection screen is the landing view.
+  const [circuitId, setCircuitId] = useState<string | null>(null);
   const [circuitDetail, setCircuitDetail] = useState<CircuitDetail | null>(null);
   const [mode, setMode] = useState<Mode>("lap");
   const [view, setView] = useState<View>("workspace");
@@ -74,6 +70,7 @@ function Workspace() {
   useEffect(() => {
     let cancelled = false;
     setCircuitDetail(null);
+    if (!circuitId) return;
     getCircuitDetail(circuitId)
       .then((detail) => {
         if (!cancelled) setCircuitDetail(detail);
@@ -106,6 +103,7 @@ function Workspace() {
   }
 
   function recordHistory(historyMode: HistoryMode, result: HistoryEntry["result"], summary: string) {
+    if (!circuitId) return;
     const entry: HistoryEntry = {
       id: newHistoryId(),
       timestamp: Date.now(),
@@ -122,7 +120,7 @@ function Workspace() {
     const file = e.target.files?.[0];
     // Reset the input so re-picking the same file fires onChange again.
     e.target.value = "";
-    if (!file) return;
+    if (!file || !circuitId) return;
     clearResults();
     await run(async () => {
       if (mode === "lap") {
@@ -150,6 +148,7 @@ function Workspace() {
   }
 
   async function handleDryStrategy() {
+    if (!circuitId) return;
     clearResults();
     await run(async () => {
       const r = await planStrategy(circuitId, null);
@@ -173,21 +172,45 @@ function Workspace() {
   }
 
   function handleReset() {
+    // Full reset: back to the circuit selection landing screen.
     clearResults();
     setView("workspace");
+    setCircuitId(null);
   }
 
   const nothingLoaded = !report && !session && !strategy && !loading;
   const activeSessionId = report?.session_id ?? session?.session_id ?? strategy?.conditions.session_id;
+  const selectedCircuitName =
+    circuitDetail?.name ?? circuits.find((c) => c.circuit_id === circuitId)?.name ?? circuitId;
+
+  // Landing view: pick a circuit before the mode navigation exists at all.
+  if (!circuitId) {
+    return (
+      <div className="min-h-screen bg-obsidian text-on-surface">
+        <TopNav circuitName={null} onChangeCircuit={() => {}} user={user} isGuest={isGuest} onLogout={logout} />
+        <main className="flex flex-col gap-3 p-4 pb-20 pt-20 md:px-8">
+          <CircuitSelect
+            circuits={circuits}
+            error={error}
+            onSelect={(id) => {
+              setCircuitId(id);
+              clearResults();
+              setView("workspace");
+            }}
+          />
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-obsidian text-on-surface">
       <TopNav
-        circuits={circuits}
-        circuitId={circuitId}
-        onCircuitChange={(id) => {
-          setCircuitId(id);
+        circuitName={selectedCircuitName}
+        onChangeCircuit={() => {
           clearResults();
+          setView("workspace");
+          setCircuitId(null);
         }}
         user={user}
         isGuest={isGuest}
@@ -265,9 +288,6 @@ function Workspace() {
 
             <div className="glass-panel flex flex-wrap items-center justify-between gap-3 rounded-lg p-3">
               <div className="flex flex-wrap items-center gap-3">
-                <span className="font-mono-data text-xs uppercase tracking-wider text-on-surface-variant">
-                  {MODE_BLURBS[mode]}
-                </span>
                 {loading && (
                   <span className="animate-pulse font-mono-data text-xs font-semibold uppercase tracking-widest text-primary-fixed-dim">
                     Processing frames — CLIP scoring in progress
@@ -329,6 +349,7 @@ function Workspace() {
             )}
 
             {strategy && <StrategyBoard report={strategy} />}
+            {mode === "strategy" && circuitDetail && <CornerDegradation circuit={circuitDetail} />}
             {session && <MultiLapView session={session} />}
             {report && <SingleLapView report={report} />}
           </>

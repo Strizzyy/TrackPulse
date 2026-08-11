@@ -35,6 +35,9 @@ def available() -> List[Dict]:
                     "sc_or_vsc_rate_pct": circuit.get("sc_or_vsc_rate_pct"),
                     "rain_frequency_pct": circuit.get("rain_frequency_pct"),
                     "corner_count": len(circuit.get("corners") or []),
+                    # Real racing-line geometry so the circuit picker can draw
+                    # true mini-maps, not just names.
+                    "track_outline": circuit.get("track_outline"),
                 }
             )
     return out

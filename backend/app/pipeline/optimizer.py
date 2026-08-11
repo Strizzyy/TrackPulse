@@ -29,7 +29,21 @@ FULL_WET_THRESHOLD = 0.65
 # Below this, a stint isn't a real strategy -- it's an in-lap and an out-lap.
 MIN_STINT_LAPS = 8
 
+# ...except on wet rubber. Real teams run 3-lap intermediate openings on a
+# drying grid and box the moment slicks pay; holding wet stints to the dry
+# 8-lap floor forces inters to run deep into the dry phase, which is exactly
+# what makes the optimiser wrongly reject them. Short stints stay wet-only.
+MIN_WET_STINT_LAPS = 3
+
 MAX_STOPS = 3
+
+# Above this wetness a slick has no meaningful grip. Running one there is a
+# crash risk, not a lap-time trade -- the simulator prices seconds, but the
+# thing a real strategist is avoiding is the DNF, which no per-lap penalty
+# expresses. Any plan that puts a slick stint on such a lap is discarded as
+# infeasible rather than merely slow. Sits between the slick/inter pace
+# crossover (~0.48) and the full-wet cutoff (0.65).
+SLICK_GRIP_CLIFF_WETNESS = 0.55
 
 # Headroom over the longest stint teams were actually observed running on a
 # compound at this circuit. Without a life cap the optimiser will happily put
@@ -105,20 +119,56 @@ def optimise(
             if c == "INTERMEDIATE" or peak_wetness > FULL_WET_THRESHOLD
         ]
 
+    # Prefix count of laps past the slick grip cliff, so per-candidate
+    # feasibility ("does this slick stint cover an undriveable lap?") is O(stints).
+    cliff_prefix = [0]
+    for w in wetness_by_lap or []:
+        cliff_prefix.append(cliff_prefix[-1] + (1 if w > SLICK_GRIP_CLIFF_WETNESS else 0))
+
+    def slick_on_cliff_lap(compounds, lengths) -> bool:
+        lap = 0
+        for compound, length in zip(compounds, lengths):
+            start = min(lap, len(cliff_prefix) - 1)
+            end = min(lap + length, len(cliff_prefix) - 1)
+            if (
+                compound.upper() not in race_sim.WET_COMPOUNDS
+                and cliff_prefix[end] - cliff_prefix[start] > 0
+            ):
+                return True
+            lap += length
+        return False
+
     results = []
     for stops in range(0, MAX_STOPS + 1):
         n_stints = stops + 1
-        for lengths in _stint_splits(total_laps, n_stints):
+        splits = _stint_splits(total_laps, n_stints)
+        if wet_race and n_stints >= 2:
+            # Short wet-rubber stints at either end of the race: an opening
+            # inter stint on a drying grid, or a late switch if rain arrives.
+            # (Compound validity -- wet rubber only -- is enforced below.)
+            for k in range(MIN_WET_STINT_LAPS, MIN_STINT_LAPS):
+                for rest in _stint_splits(total_laps - k, n_stints - 1):
+                    splits.append([k] + rest)
+                    splits.append(rest + [k])
+        for lengths in splits:
             for compounds in product(available, repeat=n_stints):
                 # The two-compound rule does not apply in a wet race -- a team
                 # can legally run intermediates start to finish.
                 if not wet_race and len(set(compounds)) < MIN_COMPOUNDS_DRY:
+                    continue
+                # A stint below the dry floor is only allowed on wet rubber.
+                if any(
+                    length < MIN_STINT_LAPS and compound.upper() not in race_sim.WET_COMPOUNDS
+                    for compound, length in zip(compounds, lengths)
+                ):
                     continue
                 if enforce_tyre_life and any(
                     length > max_stint_laps(circuit, compound)
                     for compound, length in zip(compounds, lengths)
                 ):
                     continue  # tyre wouldn't survive that stint here
+                if wet_race and slick_on_cliff_lap(compounds, lengths):
+                    continue  # slicks on an undriveable lap = DNF, not a plan
                 stints = [
                     {"compound": compound, "laps": length}
                     for compound, length in zip(compounds, lengths)

@@ -46,11 +46,28 @@ WET_COMPOUNDS = ("INTERMEDIATE", "WET")
 # A wet track costs everyone lap time regardless of tyre choice.
 WET_LAP_PENALTY_SEC = 8.0
 
-# Running the wrong rubber for the conditions. Without this the simulator would
-# happily leave slicks on a soaking track, because the uniform wet penalty
-# applies to every compound equally and so never favours wet tyres.
-SLICKS_ON_WET_PENALTY_SEC = 25.0
-WETS_ON_DRY_PENALTY_SEC = 4.0
+# Running the wrong rubber for the conditions. Calibrated against Pirelli's
+# published crossover guidance rather than picked by feel:
+#   - slicks -> inters when lap times reach ~110-112% of dry pace, i.e. slicks
+#     are the wrong tyre well before the track is fully wet;
+#   - full wet crossover ~115-118% of dry pace;
+#   - slicks on a genuinely wet track are not "slow", they are undriveable.
+# The slick mismatch is therefore CONVEX in wetness (exponent 1.5): a barely
+# damp track (0.2-0.35) costs slicks a few tenths to ~3s, the slick/inter
+# crossover lands at ~0.48 wetness -- between the damp (0.35) and full-wet
+# (0.65) label cutoffs, which is where real teams switch -- and a soaked track
+# costs slicks 40s/lap, an arithmetic stand-in for "crash risk, not a plan".
+SLICKS_ON_WET_PENALTY_SEC = 40.0
+SLICK_MISMATCH_ONSET = 0.2
+
+# Wet rubber on a drying track: inters lose ~10s to slicks once the line is
+# dry (6s pace offset + this), full wets more (they blister and overheat).
+WET_TYRE_ON_DRY_PENALTY_SEC = {"INTERMEDIATE": 4.0, "WET": 9.0}
+
+# Inters aquaplane in standing water (they clear ~30 L/s vs the full wet's
+# ~85 L/s). Above the full-wet cutoff this ramps in, putting the inter/wet
+# crossover at ~0.75 wetness so full wets actually win somewhere.
+INTER_AQUAPLANE_PENALTY_SEC = 20.0
 
 
 def compound_degradation(circuit: Dict, compound: str) -> float:
@@ -92,11 +109,14 @@ def lap_time(
     wet_penalty = WET_LAP_PENALTY_SEC * wetness
 
     # Tyre/conditions mismatch, scaled by how wrong it is.
-    is_wet_tyre = compound.upper() in WET_COMPOUNDS
-    if is_wet_tyre:
-        mismatch = WETS_ON_DRY_PENALTY_SEC * (1.0 - wetness)
+    upper = compound.upper()
+    if upper in WET_COMPOUNDS:
+        mismatch = WET_TYRE_ON_DRY_PENALTY_SEC.get(upper, 4.0) * (1.0 - wetness)
+        if upper == "INTERMEDIATE" and wetness > 0.65:
+            mismatch += INTER_AQUAPLANE_PENALTY_SEC * (wetness - 0.65) / 0.35
     else:
-        mismatch = SLICKS_ON_WET_PENALTY_SEC * max(0.0, wetness - 0.35) / 0.65
+        over = max(0.0, wetness - SLICK_MISMATCH_ONSET) / (1.0 - SLICK_MISMATCH_ONSET)
+        mismatch = SLICKS_ON_WET_PENALTY_SEC * over**1.5
 
     return base + pace + deg + fuel_penalty + wet_penalty + mismatch
 

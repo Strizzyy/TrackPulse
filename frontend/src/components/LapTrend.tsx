@@ -73,9 +73,7 @@ export default function LapTrend({ report }: Props) {
 
       {hasPartialLap && (
         <p className="font-mono-data text-[11px] text-outline">
-          Faded bar(s) are a partial lap -- too few frames to be a real lap average, most likely
-          the tail end of the upload. Excluded from the trend fit and from the current-conditions
-          read.
+          Faded bars: partial laps, excluded from the trend.
         </p>
       )}
     </div>

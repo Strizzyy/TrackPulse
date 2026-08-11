@@ -114,6 +114,7 @@ export interface CircuitSummary {
   sc_or_vsc_rate_pct: number | null;
   rain_frequency_pct: number | null;
   corner_count: number;
+  track_outline?: [number, number][] | null;
 }
 
 export interface CompoundDegradation {
@@ -238,6 +239,19 @@ export interface CircuitDetailCorner {
   distance_m: number;
   start_pct: number;
   end_pct: number;
+  /** Telemetry-derived corner character (build_circuit_data.py enrich_corners):
+   * apex speed/gear from one fast lap. Absent on JSON built before the
+   * telemetry patch existed. */
+  apex_speed_kmh?: number;
+  apex_gear?: number | null;
+  speed_class?: "slow" | "medium" | "fast";
+  /** Modelled tyre-load distribution (corner_wear_model): this corner's share
+   * of the lap's total frictional work (0..1, shares sum to 1) and how that
+   * splits into braking / traction / lateral. */
+  wear_share?: number;
+  load_brake_pct?: number;
+  load_traction_pct?: number;
+  load_lateral_pct?: number;
 }
 
 // The full per-circuit record from GET /api/circuits/{id} -- everything
@@ -260,6 +274,13 @@ export interface CircuitDetail {
   corners: CircuitDetailCorner[];
   corner_count: number;
   corner_source: string;
+  /** Real racing-line geometry from FastF1 position telemetry, normalized to
+   * a unit box, resampled uniformly by lap distance. Absent/null on circuit
+   * JSON built before the outline pull existed. */
+  track_outline?: [number, number][] | null;
+  track_outline_source?: string;
+  /** Honesty note for the per-corner wear distribution model, when present. */
+  corner_wear_note?: string | null;
   sessions_analyzed: number | null;
   sc_or_vsc_rate_pct: number | null;
   avg_first_deployment_lap: number | null;

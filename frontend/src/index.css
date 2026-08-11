@@ -179,3 +179,23 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-primary-fixed-dim);
 }
+
+/* Track-map corner callout animations (TrackMap.tsx) */
+@keyframes callout-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes leader-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
