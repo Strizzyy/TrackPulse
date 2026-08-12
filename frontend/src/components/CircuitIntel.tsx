@@ -1,6 +1,78 @@
 import type { CircuitDetail } from "../types";
+import { officialCornerName } from "../cornerNames";
 import Panel from "./Panel";
 import TrackMap from "./TrackMap";
+
+const SPEED_CLASS_COLOR: Record<string, string> = {
+  slow: "var(--color-secondary-container)",
+  medium: "var(--color-tertiary-fixed-dim)",
+  fast: "var(--color-primary-fixed-dim)",
+};
+
+/** The circuit's corner DNA from real apex telemetry: slow/medium/fast split
+ * plus the extremes. Same speed classes (and colors) as the map hovers. */
+function CornerCharacter({ circuit }: { circuit: CircuitDetail }) {
+  const corners = (circuit.corners ?? []).filter((c) => c.apex_speed_kmh != null);
+  if (corners.length === 0) return null;
+
+  const counts = { slow: 0, medium: 0, fast: 0 };
+  for (const c of corners) counts[c.speed_class ?? "medium"] += 1;
+  const fastest = corners.reduce((a, b) => (b.apex_speed_kmh! > a.apex_speed_kmh! ? b : a));
+  const slowest = corners.reduce((a, b) => (b.apex_speed_kmh! < a.apex_speed_kmh! ? b : a));
+  const label = (c: (typeof corners)[number]) => {
+    const official = officialCornerName(circuit.circuit_id, c.number);
+    return official ? `T${c.number} ${official}` : `Turn ${c.number}`;
+  };
+
+  return (
+    <Panel
+      title="Corner character"
+      right={
+        <span className="font-mono-data text-[10px] uppercase tracking-widest text-outline">
+          fastest-lap telemetry
+        </span>
+      }
+    >
+      <div className="flex h-2.5 w-full gap-0.5 overflow-hidden rounded-full">
+        {(["slow", "medium", "fast"] as const).map(
+          (k) =>
+            counts[k] > 0 && (
+              <div
+                key={k}
+                style={{ flexGrow: counts[k], backgroundColor: SPEED_CLASS_COLOR[k], opacity: 0.85 }}
+              />
+            ),
+        )}
+      </div>
+      <div className="mt-2 flex items-center gap-4">
+        {(["slow", "medium", "fast"] as const).map((k) => (
+          <span key={k} className="flex items-center gap-1.5 font-mono-data text-[11px] uppercase tracking-wider">
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: SPEED_CLASS_COLOR[k] }} />
+            <span className="text-on-surface-variant">
+              {counts[k]} {k}
+            </span>
+          </span>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-col gap-1.5 border-t border-outline-variant/20 pt-2.5">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="truncate font-mono-data text-xs text-on-surface">{label(fastest)}</span>
+          <span className="shrink-0 font-mono-data text-xs font-bold tabular-nums text-primary-fixed-dim">
+            {fastest.apex_speed_kmh} km/h
+            {fastest.apex_gear != null && <span className="text-outline"> · G{fastest.apex_gear}</span>}
+          </span>
+        </div>
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="truncate font-mono-data text-xs text-on-surface">{label(slowest)}</span>
+          <span className="shrink-0 font-mono-data text-xs font-bold tabular-nums text-secondary-container">
+            {slowest.apex_speed_kmh} km/h
+            {slowest.apex_gear != null && <span className="text-outline"> · G{slowest.apex_gear}</span>}
+          </span>
+        </div>
+      </div>
+    </Panel>
+  );
+}
 
 interface Props {
   circuit: CircuitDetail;
@@ -90,6 +162,8 @@ export default function CircuitIntel({ circuit }: Props) {
               Base rate from {circuit.sessions_analyzed ?? "—"} real seasons of race history.
             </p>
           </Panel>
+
+          <CornerCharacter circuit={circuit} />
         </div>
       </div>
 

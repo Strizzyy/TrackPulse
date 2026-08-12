@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { StrategistReport } from "../types";
 import { mediaUrl } from "../api";
 import { chipStyleForLabel } from "../labelColors";
@@ -20,6 +21,10 @@ function DataRow({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export default function SingleLapView({ report }: Props) {
+  // Corner focused from the corner-analysis table; null = the lap's latest frame.
+  const [focusedCorner, setFocusedCorner] = useState<string | null>(null);
+  const focused = report.corners.find((c) => c.corner === focusedCorner) ?? null;
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-end justify-between gap-4 border-b border-surface-container-high pb-3">
@@ -65,25 +70,54 @@ export default function SingleLapView({ report }: Props) {
           title="Corner analysis"
           className="xl:col-span-5"
           bodyClassName="max-h-96 overflow-y-auto p-0"
+          right={
+            <span className="font-mono-data text-[10px] uppercase tracking-widest text-outline">
+              click a corner to focus it
+            </span>
+          }
         >
-          <CornerStrip corners={report.corners} />
+          <CornerStrip
+            corners={report.corners}
+            activeCorner={focusedCorner}
+            onSelect={(corner) => setFocusedCorner((prev) => (prev === corner ? null : corner))}
+          />
         </Panel>
 
-        <Panel title="Latest frame" className="xl:col-span-4" bodyClassName="p-0" tactical>
+        <Panel
+          title="Frame under analysis"
+          className="xl:col-span-4"
+          bodyClassName="p-0"
+          tactical
+          right={
+            focused && (
+              <button
+                type="button"
+                onClick={() => setFocusedCorner(null)}
+                className="font-mono-data text-[10px] uppercase tracking-widest text-outline transition-colors hover:text-primary-fixed-dim"
+              >
+                ✕ back to latest
+              </button>
+            )
+          }
+        >
           <div className="relative">
             <img
-              src={mediaUrl(report.current_condition.image_url)}
-              alt="Most recent racing frame"
+              key={focused?.corner ?? "latest"}
+              src={mediaUrl(focused ? focused.image_url : report.current_condition.image_url)}
+              alt={focused ? `Representative frame at ${focused.corner}` : "Most recent racing frame"}
               className="aspect-video w-full object-cover"
+              style={{ animation: "callout-in 200ms ease-out" }}
             />
             <span
               className="absolute left-2 top-2 rounded-xs px-2 py-0.5 font-mono-data text-xs font-bold uppercase backdrop-blur-sm"
-              style={chipStyleForLabel(report.current_condition.label)}
+              style={chipStyleForLabel(focused ? focused.label : report.current_condition.label)}
             >
-              {report.current_condition.label}
+              {focused ? focused.label : report.current_condition.label}
             </span>
             <span className="absolute bottom-2 right-2 rounded-xs bg-obsidian/70 px-2 py-0.5 font-mono-data text-xs tabular-nums text-on-surface">
-              T+{report.current_condition.timestamp_sec.toFixed(1)}s
+              {focused
+                ? `${focused.corner} · ${focused.avg_wetness.toFixed(2)} wetness`
+                : `T+${report.current_condition.timestamp_sec.toFixed(1)}s`}
             </span>
           </div>
           <p className="border-t border-outline-variant/20 px-4 py-2.5 text-sm text-on-surface-variant">
