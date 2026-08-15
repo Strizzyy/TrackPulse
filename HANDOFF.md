@@ -1,15 +1,21 @@
-# TrackPulse — Handoff Context (10–11 Aug 2026)
+# TrackPulse — Handoff Context (10–15 Aug 2026)
 
 Paste this whole file as context before continuing work on this repo. It covers
 everything changed in these sessions, why, and what is still open. `CONTEXT.md` remains
-the project's overall source of truth; this file is the delta on top of commit `ba50a6b`.
+the project's overall source of truth; this file is the chronological delta log.
 
-**Nothing in here is committed yet.** All changes are in the working tree.
+**Parts 1–3 are committed and pushed** (`github.com/Strizzyy/TrackPulse`, branch
+`main`). Part 4's git state is at the end of that section. The "Nothing in here is
+committed yet" notes inside Parts 1–3 are historical.
 
-> **Part 2 (11 Aug) — Race Weekend Strategist** is at the bottom of this file. It adds
-> five circuits, a race simulator, a pit-strategy optimiser, multi-lap trend analysis,
-> and validation against real race results. Read Part 1 first for the vision work it
-> builds on.
+> **Part 4 (15 Aug) — Real geometry, telemetry, wet calibration, AWS** is at the bottom.
+> It replaces the schematic track map with real racing-line telemetry, adds per-corner
+> apex/wear data and the turn-by-turn tyre-stress chart, recalibrates the wet-tyre
+> model after it recommended slicks on a soaked grid, fixes Spa (which was actually
+> Barcelona), and documents the AWS deployment.
+> **Part 2 (11 Aug) — Race Weekend Strategist** adds five circuits, a race simulator,
+> a pit-strategy optimiser, multi-lap trend analysis, and validation against real
+> race results. Read Part 1 first for the vision work it builds on.
 
 ---
 
@@ -698,3 +704,217 @@ Everything from Parts 1-2, plus:
 4. **StrategyBoard's accept/override is local-only UI state** — if the
    human-in-the-loop decision needs to be logged anywhere durable (the
    original Part 1 pitch), that's still unbuilt.
+
+---
+---
+
+# Part 4 — Real geometry, corner telemetry, wet calibration, AWS (15 Aug 2026)
+
+Picks up on top of Part 3. Everything here was verified in a real browser against the
+running backend, and by API smoke + data-integrity checks (`scratchpad/sanity.py`,
+outside the repo — 5 circuits × outline bounds, wear-share sums, corner ordering,
+speed-class thresholds; all pass).
+
+## 1. The schematic track map is gone — real racing-line geometry
+
+Part 3 claimed "there is no 2D track geometry anywhere in this project". That was a
+choice of what to extract, not a limit of the source: FastF1 telemetry has X/Y for every
+sample. `build_circuit_data.py` gained:
+
+- **`track_outline(session)`** — fastest lap's X/Y position, rotated by
+  `get_circuit_info().rotation` to the official map orientation, resampled to **240
+  points uniformly by lap distance** (so point *i* is lap fraction *i/240* and the
+  existing `start_pct` corner-marker logic keeps working — and gets *more* accurate),
+  normalized to a unit box with aspect preserved and Y flipped for SVG. Stored as
+  `track_outline` + `track_outline_source`.
+- **`enrich_corners(session, corners)`** — per corner, minimum speed within ±40m of the
+  marked distance = apex speed, gear at that point, and `speed_class` (slow <120,
+  medium <200, fast). Real: Monza T1 79 km/h G2, Curva Grande 299 km/h G8; Spa La
+  Source 77 into Eau Rouge/Raidillon at 300+.
+- **`corner_wear_model(session, corners)`** — see §3.
+- **`patch_telemetry()` + `--telemetry-only` flag** — re-patches only these fields onto
+  existing circuit JSON from one telemetry session, seconds when the FastF1 cache is
+  warm, instead of redoing the tens-of-minutes multi-year stats pull.
+- `circuits.available()` now includes `track_outline` so the selection screen can draw
+  real mini-maps.
+
+Frontend: `TrackMap.tsx` was rewritten (see §5); `trackShapes.ts` keeps the hand-drawn
+paths **as fallback only** and exports `outlineToPath(outline, w, h, pad)`, shared by the
+map and the selection cards. Badge reads "Racing line · FastF1 telemetry" vs "Schematic
+layout" so the honesty label is automatic.
+
+## 2. Spa was Barcelona — the biggest data bug in the project
+
+Found while checking corner numbering for the name map: `spa.json` said 4.6km and 14
+corners. `CIRCUITS` passed `"Spa"` and FastF1's fuzzy lookup silently corrected it to
+the **Spanish** Grand Prix. **Every Spa signal was Barcelona's** — SC rate, pit loss,
+degradation, rain frequency, the map. Nobody caught it because nothing cross-checked
+the event name.
+
+Fix: full official GP names for all five (`"British Grand Prix"`, `"Belgian Grand
+Prix"`, …), a loud `event resolved: <EventName> / <Location>` line in the build log,
+and a full rebuild of `spa.json` from 2019–2025 Belgian GP sessions (6941.5m, 19
+corners, 42.9% rain frequency). Also flagged in CONTEXT.md. **The 2023 replay
+validation table for Spa in Part 2 / CONTEXT was computed on Barcelona data and should
+be re-run before quoting it.**
+
+## 3. Turn-by-turn tyre stress (strategy mode)
+
+`CornerDegradation.tsx` — one small-multiple bar chart per dry compound (SOFT/MEDIUM/
+HARD, F1 sidewall colours), shared y-axis, x = turn, y = ms/lap of degradation
+attributable to that corner. Top-3 wear corners full-brightness + labelled, "Biggest
+biters" chips above (e.g. Monza: **T11 Parabolica 24%**, 77% lateral — matches what real
+strategists say). Hover = corner name, ms/lap, wear share, braking/traction/lateral split,
+apex speed.
+
+**How the number is built, and the two honesty rules that took two rounds to get right:**
+- *Distribution across corners* = the wear model: frictional work per unit mass on a 5m
+  grid — braking `v·dv/ds` where decelerating, traction where accelerating, lateral
+  `v²κ` with curvature from the real X/Y line (smoothed, capped at physical limits) —
+  integrated over each corner's `start_pct..end_pct` tile. Tiles cover the whole lap, so
+  braking zones land in the corner they precede and shares sum to 1. Labelled by
+  `corner_wear_note` in the JSON.
+- *Magnitude per compound* = **exactly what `race_sim.compound_degradation()` uses**:
+  measured s/lap when `degradation_confidence` is high, the reference curve
+  (0.11/0.07/0.045) when low. The first version used measured values regardless and
+  showed **hard biting more than medium** on Silverstone (measured HARD 0.023 > MEDIUM
+  0.011 — the same non-monotonic artefact the sim already refuses). The chart now
+  mirrors the sim's rule and its badge says which mode ("load model × reference deg —
+  as simulated"). The distribution is shared across compounds (scaled by s/lap);
+  per-compound *shape* differences would need invented thermal physics — not done.
+- Because Silverstone/Spa/Monza are all low-confidence, they show the *same* per-lap
+  totals — that is the generic reference curve, by design. Scaling it per circuit would
+  be false precision (the measured levels are the contaminated part).
+
+Reading it correctly: the s/lap figure is a **rate** — each lap of age adds that much to
+all subsequent laps (0.11 s/lap soft ≈ 2.1s slower by lap 20, ~21s cumulative over a
+stint, which is exactly why a 22s pit stop pays). Bars show where wear is *generated*,
+not where time is *lost*.
+
+## 4. Wet-strategy calibration — the model recommended a DNF
+
+On Suzuka footage projecting 0.6 wetness drying to 0 by lap 22, the optimiser returned
+`M23 / H30` — **slicks from a soaked grid**. Root cause: `SLICKS_ON_WET_PENALTY_SEC =
+25` applied linearly above 0.35, so slicks at 0.6 wetness cost only ~9.6s/lap and the
+slick/inter crossover sat at 0.56; inters were legal but bled time on the drying laps
+after that, and with `MIN_STINT_LAPS = 8` a real "3-lap inter opening" was not even
+representable. Pure lap-time arithmetic happily traded a crash for a pit stop.
+
+Fixes, grounded in Pirelli's published crossover guidance (slicks→inters at ~110–112%
+of dry pace; full-wet crossover ~115–118%; inters clear ~30 L/s vs full wets ~85 L/s):
+
+| where | change |
+|---|---|
+| `race_sim.py` | Slick mismatch is now **convex**: onset 0.2, exponent 1.5, `SLICKS_ON_WET_PENALTY_SEC = 40` at fully wet → crossover ~0.48 wetness ≈ 112% of dry pace; 48s/lap at 1.0 ("undriveable" in arithmetic) |
+| `race_sim.py` | `WET_TYRE_ON_DRY_PENALTY_SEC = {INTERMEDIATE: 4, WET: 9}` (was one 4s constant) |
+| `race_sim.py` | `INTER_AQUAPLANE_PENALTY_SEC = 20`, ramping in above 0.65 → inter/wet crossover ~0.78, so full wets actually win somewhere (before, inters beat wets at *every* wetness) |
+| `optimizer.py` | `MIN_WET_STINT_LAPS = 3` — short stints allowed at either end of the race, **wet rubber only** |
+| `optimizer.py` | `SLICK_GRIP_CLIFF_WETNESS = 0.55` + `slick_on_cliff_lap()` (prefix-sum, O(stints) per candidate): any plan running slicks on a lap above the cliff is **discarded as infeasible**, not merely slow. Even with the harsher curve, pure math still barely preferred a slick start (+0.38s) — this rule is what encodes "the strategist is avoiding the DNF" |
+
+Results (`scratchpad/test_wet_calibration.py`, outside the repo):
+- Suzuka drying 0.6→0: `M23 / H30` → **`I5 / M23 / M25`** (inter opening, box L5)
+- Suzuka dry: unchanged `H29 / M24`
+- Monsoon 0.9→0.5: **`W8 / I21 / I24`** (full wets first, inters as it eases)
+- Per-lap cost vs dry medium: MEDIUM best ≤0.45, INTER 0.5–0.7, WET ≥0.8
+
+Absolute wet race times shifted (~1:26:46 → ~1:27:34 for that scenario) because early
+damp laps are priced properly — as the board already says, trust deltas not absolutes.
+
+## 5. Frontend: selection-first flow, interactive map, corner callouts, cleanup
+
+- **`CircuitSelect.tsx`** (new landing screen): five cards, real racing-line mini-maps,
+  real stats. `App.tsx`: `circuitId: string | null`; **Change** in TopNav and **Reset
+  session** both return to selection. `TopNav.tsx` rewritten (chips → selected circuit +
+  Change); the redundant `MODE_BLURBS` bar is gone.
+- **`TrackMap.tsx`** rewritten: real outline; **zoom** (wheel toward cursor, +/− buttons,
+  1–6×, non-passive wheel listener so the page does not scroll) and **drag pan** via
+  `<g transform>` with strokes/markers held at constant screen size; **direction arrow +
+  start/finish tick** (real — outline is ordered by lap distance; hidden on schematic
+  fallback whose winding is arbitrary); **corner callout card** beside the marker with a
+  leader line (flips side near the edge), showing `Turn N — Official Name`, apex speed,
+  gear, slow/medium/fast chip, distance, lap position; **hover previews, click pins**
+  (radar-ping ring, ✕, click-elsewhere dismisses, pinned card re-anchors through
+  zoom/pan); `callout-in` / `leader-draw` keyframes in `index.css`.
+- **`cornerNames.ts`** (new): curated official corner names per circuit keyed by FastF1
+  corner number, following the official maps. Curated display labels, not FastF1 data.
+- **`CircuitIntel.tsx`**: "Corner Character" panel (slow/medium/fast stacked bar +
+  fastest/slowest corner with speed and gear) fills the space where the duplicate
+  Pit-lane-metrics panel was.
+- **`SingleLapView.tsx`**: corner rows clickable → right panel (renamed **"Frame under
+  analysis"**) shows that corner's representative frame with a fade; ✕ back to latest.
+- **Text-cleanup pass** across every view: duplicate Honest Degradation panel in
+  StrategyBoard removed; `strategy.note` rendered once; frames/session-id dedup in Single
+  Lap; the `Projection = slope + weather` formula footers removed; long footnotes moved
+  into `title` tooltips on badges/headers (`cursor-help`); Multi-lap headline now
+  `Multi-lap_Session / circuit` like the other modes; stale AuthScreen/History copy
+  shortened; the "Local only — the human strategist decides" caption removed.
+
+## 6. Merge notes (teammate overlap)
+
+Teammate `BaibhavKundu2005` landed `6420b24` ("fixed single lap features and removed ai
+text") mid-session: `net_slope` / `net_slope_per_lap` fields (`trend.py`, `weather.py`,
+`strategy.py`, `main.py`, `types.ts`) and their own text trims in Single/Multi-lap and
+AuthScreen. Rebase conflicted only in `AuthScreen.tsx` (both trimmed the same two
+paragraphs) — resolved keeping the compact account warning + their tagline. Everything
+else auto-merged; `tsc` clean on the merged tree; **backend must be restarted after
+pulling** — the merged frontend requires `net_slope` in the response.
+
+## 7. Deployment (AWS) + presentation
+
+Docker Spaces on Hugging Face went PRO-only, so the free plan is **EC2 + nginx + S3 +
+CloudFront** (teammate's architecture). Added `deploy/nginx.conf`, `deploy/AWS_DEPLOY.md`
+(full runbook — the four gotchas are in CONTEXT.md's Deployment section), and
+`backend/Dockerfile` + `.dockerignore` (bakes CLIP weights; still useful for any Docker
+host). AWS CLI was installed on the dev machine; the actual account setup/deploy is
+teammate-driven. `pptscript.md` — presentation script (uniqueness, bottleneck, audience,
+old-vs-new, features, Mermaid architecture, stack, algorithms/scaling, vision).
+
+## 8. Files touched this session
+
+```
+backend/scripts/build_circuit_data.py     track_outline, enrich_corners, corner_wear_model,
+                                          patch_telemetry/--telemetry-only, full GP event names
+backend/app/pipeline/circuits.py          track_outline in available()
+backend/app/pipeline/race_sim.py          wet-model recalibration (§4)
+backend/app/pipeline/optimizer.py         MIN_WET_STINT_LAPS, grip cliff (§4)
+backend/app/data/circuits/*.json          outlines + apex + wear on all 5; spa.json fully rebuilt
+backend/Dockerfile, .dockerignore         new
+deploy/nginx.conf, deploy/AWS_DEPLOY.md   new
+frontend/src/components/TrackMap.tsx      rewritten
+frontend/src/components/CircuitSelect.tsx new
+frontend/src/components/CornerDegradation.tsx new
+frontend/src/cornerNames.ts               new
+frontend/src/trackShapes.ts               outlineToPath(); paths are fallback
+frontend/src/components/shell/TopNav.tsx  rewritten
+frontend/src/App.tsx                      selection-first flow
+frontend/src/components/CircuitIntel.tsx  Corner Character; cleanup
+frontend/src/components/SingleLapView.tsx corner focus; cleanup
+frontend/src/components/CornerStrip.tsx   selectable rows
+frontend/src/components/{MultiLapView,StrategyBoard,LapTrend,HistoryView}.tsx  cleanup
+frontend/src/pages/AuthScreen.tsx         cleanup
+frontend/src/index.css                    callout keyframes
+frontend/src/types.ts                     outline/apex/wear/wear-note fields
+pptscript.md, CONTEXT.md, HANDOFF.md, README.md
+```
+
+## 9. Still open
+
+Everything from Parts 1–3 not struck out in CONTEXT.md, plus:
+1. **Re-run `validate_replay.py` for Spa** — the quoted 2023 numbers were Barcelona.
+2. **CloudFront 180s origin-timeout quota** must be approved (or demo short clips)
+   before `/api/analyze` works through the CDN.
+3. **Per-compound corner physics** (thermal model) if the tyre-stress chart should
+   differ in *shape* between compounds, not just scale.
+4. Corner-name map (`cornerNames.ts`) is curated by hand — a second pair of eyes on
+   Suzuka/Spa numbering against the official maps would not hurt.
+5. Mobile visual QA on the selection screen, side-nav-less layout, and touch pan.
+
+## 10. Commands
+
+```bash
+uv run python scripts/build_circuit_data.py --telemetry-only    # re-patch outline/apex/wear (fast)
+uv run python scripts/build_circuit_data.py --circuit spa       # full rebuild of one circuit (slow)
+uv run python scripts/test_strategy.py                          # ALL PASS expected
+uv run python scripts/validate_replay.py --year 2023            # re-run for Spa
+cd frontend && npx tsc --noEmit -p tsconfig.app.json && npm run build
+```

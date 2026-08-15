@@ -40,6 +40,23 @@ MODEL_NAME = "openai/clip-vit-base-patch32"
 #   wet trackside short (heavy spray):     0.744 avg
 # One clip (a vertical 9:16 trackside short) reads 0.539 and fails the 0.65
 # bar -- see the aspect-ratio caveat on WETNESS_CROP_BAND below.
+#
+# Shadow false positives (15 Aug 2026): on a bone-dry, SUNNY onboard lap
+# (Monza, Verstappen, session e817b918) the lap averaged 0.15 -- correctly
+# dry -- but isolated single frames spiked to 0.53-0.65 ("wet") wherever a
+# hard tree/grandstand shadow filled the top crop band, and a dry Monaco lap
+# read Rascasse at 0.80 for the same reason. Dark tarmac reads as wet tarmac,
+# and neither dry prompt mentioned sun or shadow ("overcast sky" is the
+# opposite of the failing frames). Two-part fix, measured on that footage:
+#   1. A third prompt pair that describes a dry track *in bright sunshine
+#      with hard shadows across it* vs. a wet one -- gives CLIP a dry
+#      hypothesis that actually matches a shadowed frame.
+#   2. Temporal median smoothing across neighbouring frames (see
+#      smooth_wetness below) -- the fix that actually closes it. A track
+#      surface does not switch wet -> dry -> wet inside one second, but a
+#      shadow, a dark car or a barrier passes through the crop band in one
+#      frame; the median rejects those single-frame outliers while leaving a
+#      genuine wet phase (many consecutive high frames) untouched.
 PROMPT_PAIRS = [
     (
         "an onboard camera view from inside a Formula 1 car, driving on a dry, "
@@ -48,10 +65,21 @@ PROMPT_PAIRS = [
         "rain-soaked racetrack with visible spray and standing water",
     ),
     (
+        "an onboard camera view from inside a Formula 1 car on a dry racetrack in "
+        "bright sunshine, with hard shadows from trees and grandstands cast across the tarmac",
+        "an onboard camera view from inside a Formula 1 car on a wet racetrack, "
+        "rain falling, spray behind the cars, reflections and standing water on the tarmac",
+    ),
+    (
         "a photo of a Formula 1 car racing on a dry track in clear conditions",
         "a photo of a Formula 1 car racing on a wet track in the rain, throwing up spray",
     ),
 ]
+
+# Temporal smoothing window (frames, odd). At ~1 fps this is +/-2 seconds of
+# track -- short enough that a real wet/dry transition still shows up within a
+# few frames, long enough that a one-frame shadow can't win a majority.
+SMOOTH_WINDOW = 5
 
 # Vertical band of the frame that actually contains track surface, as
 # (start, end) fractions of image height -- everything outside it is cropped
@@ -168,8 +196,36 @@ def analyze_frame(image_path: str, crop_band=None) -> Dict[str, float]:
         }
 
 
+def smooth_wetness(scores: List[float], window: int = SMOOTH_WINDOW) -> List[float]:
+    """Running median over neighbouring frames. Kills isolated single-frame
+    spikes (shadows, dark bodywork, a barrier filling the crop band) without
+    lagging or damping a real transition the way a mean would -- the median of
+    [0.05, 0.08, 0.65, 0.09, 0.06] is 0.08; the median of five genuinely wet
+    frames is still wet. Edges shrink the window rather than padding."""
+    if window <= 1 or len(scores) < 3:
+        return list(scores)
+    half = window // 2
+    out = []
+    for i in range(len(scores)):
+        lo, hi = max(0, i - half), min(len(scores), i + half + 1)
+        neighbourhood = sorted(scores[lo:hi])
+        n = len(neighbourhood)
+        mid = n // 2
+        out.append(neighbourhood[mid] if n % 2 else (neighbourhood[mid - 1] + neighbourhood[mid]) / 2.0)
+    return out
+
+
 def analyze_frames(image_paths: List[str]) -> List[Dict[str, float]]:
-    return [analyze_frame(p) for p in image_paths]
+    """Per-frame wetness + racing confidence for a whole clip, with the
+    wetness series temporally median-smoothed (see smooth_wetness). The raw
+    per-frame value is kept as `wetness_raw` so calibration scripts and the
+    curious can still see what CLIP said about each frame on its own."""
+    results = [analyze_frame(p) for p in image_paths]
+    smoothed = smooth_wetness([r["wetness"] for r in results])
+    for r, s in zip(results, smoothed):
+        r["wetness_raw"] = r["wetness"]
+        r["wetness"] = s
+    return results
 
 
 def score_frame(image_path: str) -> float:

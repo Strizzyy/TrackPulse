@@ -1,0 +1,9 @@
+.venv/
+.hf_cache/
+.fastf1cache/
+.env
+data/uploads/*
+!data/uploads/.gitkeep
+reference_footage/
+__pycache__/
+*.pyc

@@ -61,6 +61,9 @@ circuits** (Silverstone, Monaco, Spa, Monza, Suzuka), chosen for strategic varie
 ```
 offline, once:  FastF1 2019-2025 race sessions
   -> real corner geometry (get_circuit_info, Distance in metres)
+  -> real racing-line outline (fastest-lap X/Y position telemetry, 240 pts)   [added 15 Aug]
+  -> per-corner apex speed / gear / slow-medium-fast class                    [added 15 Aug]
+  -> per-corner tyre-load model (braking + traction + lateral, wear_share)     [added 15 Aug]
   -> tyre degradation per compound (panel regression, track-evolution controlled)
   -> pit loss, SC/VSC rate + first-deployment lap, rain frequency, race distance
   -> app/data/circuits/{id}.json          [scripts/build_circuit_data.py]
@@ -75,8 +78,21 @@ at request time (no FastF1 call, ever):
 
 The vision pipeline stays load-bearing: measured wetness decides which compounds are
 even considered (intermediates appear above 0.35) and shifts the recommended plan. At
-Spa, the same circuit returns `M29 / H37` assuming dry and `H32 / H34` when real wet
-footage is supplied.
+Suzuka, a track projected 0.6 wetness drying to 0 by lap 22 returns `I5 / M23 / M25`
+(intermediate opening, box lap 5) where a dry assumption returns `H29 / M24`.
+
+**Wet-strategy calibration (15 Aug 2026).** The first version of the wet model
+recommended slicks (`M23 / H30`) on that same 0.6-wetness grid -- a real-world DNF --
+because a linear, shallow slicks-on-wet penalty let pure lap-time arithmetic trade a
+crash risk for a saved pit stop. `race_sim.py` now uses a **convex** slick mismatch
+(onset 0.2, exponent 1.5, 40s at fully wet) calibrated so the slick/inter crossover
+lands at ~0.48 wetness = ~112% of dry pace (Pirelli's published crossover guidance),
+per-compound wet-rubber-on-dry penalties, and an inter aquaplaning term above 0.65
+(inters clear ~30 L/s vs full wets ~85 L/s), so full wets actually win above ~0.78.
+`optimizer.py` adds `MIN_WET_STINT_LAPS = 3` (wet-rubber stints may be short, e.g. a
+3-lap inter opening) and a hard **grip-cliff feasibility rule**: any plan running slicks
+on a lap wetter than 0.55 is discarded as infeasible, not merely slow -- the simulator
+prices seconds; the strategist is avoiding the crash. Dry-race output is unchanged.
 
 **Multi-lap session mode** (`POST /api/analyze-session`) fixes a conceptual flaw in the
 single-lap trend -- see "Trend over time" below.
@@ -107,6 +123,8 @@ backend/
       circuits/*.json       # 5 circuits built from real FastF1 sessions -- the strategy inputs
   scripts/
     build_circuit_data.py   # ONE-TIME FastF1 pull -> app/data/circuits/*.json (slow; commit output)
+                            #   --telemetry-only: fast re-patch of outline/apex/wear fields onto existing JSON
+                            #   --circuit <id>:   one circuit only
     validate_replay.py      # scores the optimiser against real race results
     test_strategy.py        # sanity checks for fuel/race_sim/optimizer + circuit data
     test_weather_branches.py# forces all three weather branches with stubbed forecasts
@@ -117,14 +135,22 @@ backend/
     smoke_test.py            # BROKEN, see "Known broken" below
   .env.example              # copy to .env, add HF_TOKEN to activate the LLM agent
   pyproject.toml / uv.lock   # uv-managed, see Quickstart in README.md
+  Dockerfile / .dockerignore # container build (bakes CLIP weights in); usable on any Docker host
+
+deploy/
+  nginx.conf                # EC2 reverse proxy: 300M uploads, 300s CLIP timeouts
+  AWS_DEPLOY.md             # the production runbook: EC2 + nginx + S3 + CloudFront
+
+pptscript.md                # presentation / pitch script (uniqueness, architecture, algorithms, vision)
 
 frontend/
   src/
     types.ts               # TypeScript mirror of the backend response shape -- SOURCE OF TRUTH for the contract
     api.ts                  # fetch wrappers: analyzeLap(), analyzeSession(), planStrategy(), getCircuit(Detail)s()
-    App.tsx                  # circuit -> mode -> load footage flow; auth gate; history recording
+    App.tsx                  # circuit SELECTION SCREEN first (circuitId null) -> mode -> load footage; auth gate; history
     history.ts               # localStorage run history (per account/guest), capped at 20 entries
-    trackShapes.ts            # stylized per-circuit SVG loop paths -- schematic, not survey-accurate (see below)
+    trackShapes.ts            # outlineToPath() fits real track_outline into a viewBox; hand-drawn paths are FALLBACK only
+    cornerNames.ts            # curated official corner names per circuit keyed by FastF1 corner number ("Turn 9 -- Copse")
     labelColors.ts            # dry/damp/drying/wet -> color mapping (Apex Control palette)
     auth/
       AuthContext.tsx          # localStorage-only signup/login/guest -- NOT a secure backend auth system
@@ -132,12 +158,17 @@ frontend/
       AuthScreen.tsx            # login/signup/continue-as-guest screen, shown before the app if not authed
     components/
       shell/
-        TopNav.tsx               # brand + circuit picker + account
-        SideNav.tsx               # mode nav (single/multi/strategy) + history + reset
+        TopNav.tsx               # brand + selected circuit + "Change" (back to selection) + account
+        SideNav.tsx               # mode nav (single/multi/strategy) + history + reset (reset -> selection screen)
         Footer.tsx                 # real backend-reachability + CrewAI-agent-active status
-      CircuitIntel.tsx          # SC windows, pit metrics, honest-degradation panel, track map -- shown per circuit
-      TrackMap.tsx                # schematic SVG track loop, real corner markers at real start_pct
-      SingleLapView.tsx          # single-lap report (condition, corners, trend chart, recommendation)
+      CircuitSelect.tsx         # LANDING SCREEN: five circuit cards with real racing-line mini-maps + stats
+      CircuitIntel.tsx          # tactical map, stats row, SC windows, Corner Character, Honest Degradation
+      TrackMap.tsx                # REAL racing-line SVG (track_outline) w/ zoom (wheel/buttons 1-6x) + drag pan,
+                                  #   corner markers at real start_pct, hover/click-to-pin telemetry callout card
+                                  #   (apex speed, gear, class, distance), direction arrow + start/finish tick.
+                                  #   Falls back to trackShapes.ts schematic + "Schematic layout" badge if no outline.
+      CornerDegradation.tsx       # turn-by-turn tyre-stress small multiples per compound (Recharts) -- strategy mode
+      SingleLapView.tsx          # single-lap report; corner rows are clickable -> "Frame under analysis" panel
       MultiLapView.tsx            # multi-lap session (lap strip, corner-analytics table, wetness/lap chart)
       LapStrip.tsx                  # horizontal strip of real per-lap frame thumbnails
       CornerAnalyticsTable.tsx      # corner x lap wetness pivot, "est. dry lap" derived from the real trend slope
@@ -202,8 +233,14 @@ instead of the hand-made `silverstone.json` -- see `circuits.py` / `main.py`'s `
 ```
 GET  /api/circuits              -> [{ circuit_id, name, race_laps, avg_lap_time_sec,
                                       pit_loss_sec, sc_or_vsc_rate_pct,
-                                      rain_frequency_pct, corner_count }, ...]
-GET  /api/circuits/{id}         -> full circuit record incl. real corners + degradation
+                                      rain_frequency_pct, corner_count,
+                                      track_outline }, ...]           (outline added 15 Aug, for the picker mini-maps)
+GET  /api/circuits/{id}         -> full circuit record incl. real corners + degradation, plus (15 Aug):
+                                      track_outline: [[x,y] x 240] unit-box racing line, uniform by lap distance
+                                      track_outline_source, corner_wear_note
+                                      corners[]: + apex_speed_kmh, apex_gear, speed_class (slow|medium|fast),
+                                                 wear_share (sums to 1 across the lap),
+                                                 load_brake_pct / load_traction_pct / load_lateral_pct
 GET  /api/track/silverstone     -> UNCHANGED legacy endpoint. As of the 11 Aug UI revamp
                                     the frontend no longer calls this directly (App.tsx
                                     dropped getTrack() in favour of the circuit picker /
@@ -390,11 +427,13 @@ three score bands; the dangerous silent case (dry + wetting) returns a high-urge
   The single-lap and multi-lap recommendation panels are still display-only.
 - **Pre-race setup/wing recommendation.** Was flagged as first-to-cut under time
   pressure in the original plan; time went to fixing vision accuracy instead.
-- **Real 2D track geometry.** `build_circuit_data.py` only pulls 1D corner *distance*
-  along the lap, never X/Y position telemetry (FastF1's `get_telemetry()` has it, just
-  never fetched). The frontend's `TrackMap.tsx` draws a stylized, labelled-as-schematic
-  loop per circuit with corner markers at their real proportional distance -- the corner
-  count/names/spacing are real, the loop shape is not survey-accurate.
+- ~~Real 2D track geometry~~ -- **BUILT 15 Aug 2026.** `build_circuit_data.py` now pulls
+  the fastest lap's X/Y position telemetry, rotates it to FastF1's official map angle,
+  resamples 240 points uniformly by lap distance and stores it as `track_outline`.
+  `TrackMap.tsx` draws that real racing line (badge: "Racing line · FastF1 telemetry");
+  the hand-drawn `trackShapes.ts` paths survive only as a fallback for circuit JSON
+  built before this. Caveat: it is one fast lap's *racing line*, not the track edges --
+  it clips apexes slightly, which is how most F1 track maps are drawn anyway.
 - Corner/sector percentages in `silverstone.json` are **rough estimates**, not
   surveyed sector-time data -- see the `note` field in that file. The other 4 circuits'
   corner data in `app/data/circuits/*.json` IS real (FastF1 `get_circuit_info()`).
@@ -408,7 +447,9 @@ is surfaced in the API response, not just here:
 
 | input | status |
 |---|---|
-| Corner geometry (all 5 circuits) | **real** -- FastF1 `get_circuit_info`, corner Distance in metres. Counts check out: Monaco 19, Monza 11, Suzuka 18, Silverstone 18 |
+| Corner geometry (all 5 circuits) | **real** -- FastF1 `get_circuit_info`, corner Distance in metres. Counts check out: Monaco 19, Monza 11, Suzuka 18, Silverstone 18, Spa 19 |
+| Racing-line outline, per-corner apex speed / gear | **real** -- fastest-lap X/Y + speed telemetry, 2025 race (15 Aug) |
+| Per-corner wear distribution (`wear_share`) | **modelled** -- frictional-work-per-unit-mass model over real telemetry (braking `v·dv/ds` + traction + lateral `v²κ`); distributes real per-lap degradation across corners, never invents a total. Labelled via `corner_wear_note` (15 Aug) |
 | Pit loss | **real** -- 20.5s Monaco to 25.8s Monza, from in/out laps vs each driver's own green-lap median, safety-car stops excluded |
 | SC/VSC rate + first-deployment lap | **real** -- per circuit, 7 seasons |
 | Rain frequency | **real** -- `session.weather_data`, 0% at Monza to 42.9% at Silverstone |
@@ -428,6 +469,17 @@ circuit `degradation_confidence: "low"` and `race_sim.py` falls back to referenc
 degradation. The measured numbers stay in the JSON and in the API response so the
 disagreement is visible. **Do not claim measured per-circuit degradation is driving the
 simulation -- it currently is not.**
+
+**Spa was Barcelona until 15 Aug 2026.** `build_circuit_data.py` passed the event
+name `"Spa"` to FastF1, whose fuzzy event lookup silently corrected it to the
+**Spanish** Grand Prix -- so every Spa signal (4.6km lap, 14 corners, SC rate, pit
+loss, degradation, rain frequency, and the map) was Circuit de Barcelona-Catalunya.
+Caught only when corner numbering was checked against real Spa naming. Fixed: the
+`CIRCUITS` table now uses full official GP names (`"Belgian Grand Prix"` etc.), the
+build log prints `event resolved: <EventName> / <Location>` as a loud sanity check,
+and `spa.json` was fully rebuilt from seven seasons of real Belgian GP data (6.94km,
+19 corners, La Source 77 km/h into Eau Rouge/Raidillon flat at 300+). **If you add
+a circuit, use its full GP name and check the `event resolved` line.**
 
 **Validation against real races** (`scripts/validate_replay.py`) -- the optimiser scored
 against what winning teams actually did in 2023, excluding races it does not model
@@ -463,27 +515,40 @@ provenance) -- their example data was fake (a fabricated "Car 16" scenario, an i
 Monaco SC-window screenshot) and was treated as style reference only; every number the
 app actually shows still comes from the real backend contract above.
 
-**Flow**: circuit picked first (top bar, all 5, in every mode -- previously only
-Multi-lap/Strategy had a picker and Single Lap was silently Silverstone-only) → Circuit
-Intel panel appears immediately (SC windows, pit metrics, Honest Degradation, a
-schematic track map with real corner markers) → then single-lap/multi-lap/strategy mode
-→ load footage. Auth (`auth/AuthContext.tsx`) gates the whole app: login/signup/guest,
-**local-only** (see "Explicitly not built" above) -- not a security feature, just enough
-to namespace the local run history (`history.ts`, `HistoryView.tsx`) per identity.
+**Flow (revised 15 Aug 2026)**: the app lands on a **circuit selection screen**
+(`CircuitSelect.tsx` -- five cards, each drawing its real racing-line mini-map from
+`track_outline` plus real stats; `circuitId` is `null` until one is picked) → Circuit
+Intel appears (zoomable real track map with pinnable corner telemetry callouts, stats
+row, SC windows, Corner Character, Honest Degradation) → then the side-nav modes
+single-lap/multi-lap/strategy → load footage. The top bar shows the selected circuit
+with a **Change** button back to selection; **Reset session** also returns to selection.
+Auth (`auth/AuthContext.tsx`) gates the whole app: login/signup/guest, **local-only**
+(see "Explicitly not built" above) -- not a security feature, just enough to namespace
+the local run history (`history.ts`, `HistoryView.tsx`) per identity.
+
+**UI conventions worth keeping (15 Aug text-cleanup pass):** every number appears once
+(the duplicate Honest Degradation panel in StrategyBoard and the Pit-lane-metrics panel
+in Circuit Intel were removed); methodology/honesty explanations live in `title` hover
+tooltips on the relevant badge or panel header (`cursor-help`), not in paragraphs under
+panels; headlines follow `Mode_Name / Circuit` in all three modes; tyre-compound
+colors are the F1 sidewall set (`.compound-*` in `index.css`, validated CVD-safe on the
+obsidian surface); slow/medium/fast corner classes share one color mapping between the
+map callouts and the Corner Character panel.
 
 Highest-value next things, roughly in order:
-1. **A real 2D track map.** `TrackMap.tsx`'s loop is schematic (see "Explicitly not
-   built"); making it accurate means pulling X/Y telemetry into
-   `build_circuit_data.py` and persisting a real polyline per circuit.
-2. **Persisting the human-in-the-loop decision.** `StrategyBoard.tsx`'s
+1. **Persisting the human-in-the-loop decision.** `StrategyBoard.tsx`'s
    accept/override is real interactive state but local-only -- no backend endpoint
    records it, and the single-lap/multi-lap recommendation panels are still
    display-only.
+2. **Per-compound corner physics.** The turn-by-turn tyre-stress chart shares one wear
+   *distribution* across compounds (scaled by each compound's s/lap). Softs suffering
+   relatively more in traction zones etc. would need a thermal model -- deliberately not
+   invented; the shape is honest as-is.
 3. **A real backend account system**, if cross-device history/login actually matters --
    current auth is intentionally a local-only shell, not a step toward one.
-4. No headless browser was available when this was built, so it was verified via
-   `tsc --noEmit` / `oxlint` / forcing Vite to transform every changed module, **not**
-   an actual screenshot -- do a real visual QA pass before demoing.
+4. **Visual QA on real devices.** The 15 Aug work was verified in a real browser on
+   desktop; mobile (SideNav hidden, selection cards stacked, touch pan on the map) has
+   only been reasoned about, not tapped.
 
 Run it: `cd frontend && npm install && npm run dev`. `src/types.ts` is the contract --
 if the backend response shape ever changes, that file (and only that file) needs
@@ -528,3 +593,27 @@ backend (port 8000), `npm install` + `npm run dev` for the frontend (port 5173, 
 the backend at `localhost:8000` by default). The backend works fully without an
 `HF_TOKEN` (rule-based fallback everywhere the LLM would otherwise be used); add one to
 `backend/.env` to activate the real CrewAI agent step.
+
+## Deployment (AWS, 15 Aug 2026)
+
+Production runs on AWS: **FastAPI on EC2** (`t3.medium` -- CLIP needs ~4GB; a micro
+OOMs) as a systemd service behind **nginx**, the built frontend in a private **S3**
+bucket, both unified behind **CloudFront**, which supplies the free HTTPS URL and routes
+by path (default → S3, `/api/*` and `/media/*` → EC2). Full click-by-click runbook,
+including the systemd unit and the CloudFront behaviors, is `deploy/AWS_DEPLOY.md`;
+the nginx config is `deploy/nginx.conf`.
+
+Things that bite, all handled in the runbook -- read it before touching the deploy:
+- Build the frontend with **`VITE_API_BASE=""`** (empty string, not unset) so every API
+  and `/media` URL is relative and flows through CloudFront -- no CORS, no mixed content.
+- **CloudFront's origin response timeout** defaults to 30s (console max 60s); a lap
+  analysis takes 60-120s of CLIP on CPU, so `/api/analyze` 504s until the free Service
+  Quotas increase to 180s is approved. Demo with short clips meanwhile.
+- nginx needs `client_max_body_size 300M` and 300s proxy timeouts (in `nginx.conf`) --
+  the defaults reject video uploads (413) and hang up mid-analysis.
+- Put an **Elastic IP** on the instance; stop/start otherwise changes the public DNS and
+  silently breaks the CloudFront origin. Stop the instance when not demoing (~$1/day
+  running, pennies stopped).
+
+`backend/Dockerfile` also exists (bakes the CLIP weights into the image) for any Docker
+host; it was written for Hugging Face Spaces before HF made Docker Spaces PRO-only.
