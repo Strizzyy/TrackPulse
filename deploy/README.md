@@ -89,6 +89,48 @@ aws cloudfront create-invalidation --distribution-id E2Q6M7KIXZUAFG --paths "/*"
   original Hugging Face Spaces deployment's "ephemeral storage" behaviour,
   see `backend/README.md`).
 
+## Pausing for an extended period (no cost) and resuming
+
+`deploy/pause.sh` stops the EC2 instance and **releases** its Elastic IP —
+release is required for real $0, since AWS bills the public-IPv4 charge
+whether or not the IP is attached to a running instance. The EBS volume
+(built Docker image, uploaded data) is kept, so resuming doesn't mean
+rebuilding from scratch. The frontend (S3 + CloudFront) is left running —
+it costs ~$0 at rest either way.
+
+```bash
+./deploy/pause.sh
+```
+
+Because the Elastic IP is released, the backend's address changes on
+resume (new IP → new `sslip.io` hostname → new TLS cert). `deploy/resume.sh`
+does the whole chain: start the instance, allocate a new IP, issue a fresh
+Let's Encrypt cert, repoint nginx, confirm the container came back up on
+its own (`--restart unless-stopped` survives the stop/start), then rebuild
+and redeploy the frontend against the new backend URL.
+
+```bash
+./deploy/resume.sh
+```
+
+Takes a few minutes end to end. The one thing this doesn't automate:
+`frontend/.env.production` gets rewritten with the new backend URL — commit
+that if you want git to reflect it.
+
+## Cost monitoring
+
+`trackpulse-dev` has no billing access by default — two one-time steps:
+
+1. **Root-only**: Console → account name (top right) → **Account** →
+   "IAM User and Role Access to Billing Information" → Activate. No IAM
+   policy can substitute for this; it has to be the root user.
+2. Add the `CostMonitoring` statement in `iam-policy-trackpulse-dev.json`
+   to the attached policy (console → IAM → Policies → edit JSON).
+
+Once both are in place, an AWS Budget with email alerts can be created —
+see the account's Billing → Budgets console, or ask for it to be created
+via CLI (`aws budgets create-budget`).
+
 ## Teardown (if this deployment is ever decommissioned)
 
 ```bash

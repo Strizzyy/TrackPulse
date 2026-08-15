@@ -30,3 +30,5 @@ frontend/dist/
 deploy/*.pem
 deploy/.*
 deploy/*_output.json
+deploy/budget.json
+deploy/budget-notifications.json

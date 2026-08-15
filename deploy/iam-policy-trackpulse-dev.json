@@ -76,6 +76,19 @@
         "iam:CreateAccessKey"
       ],
       "Resource": "arn:aws:iam::*:user/${aws:username}"
+    },
+    {
+      "Sid": "CostMonitoring",
+      "Effect": "Allow",
+      "Action": [
+        "budgets:ViewBudget",
+        "budgets:CreateBudget",
+        "budgets:ModifyBudget",
+        "budgets:DescribeBudgetAction*",
+        "ce:GetCostAndUsage",
+        "ce:GetCostForecast"
+      ],
+      "Resource": "*"
     }
   ]
 }
