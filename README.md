@@ -4,7 +4,7 @@
 
 TrackPulse turns onboard footage into a race-engineer's call. Load a lap, and one honest pipeline reads the track surface, trends it against live weather, prices every pit strategy against seven seasons of real F1 history, and hands the strategist a decision — with every number either real or labelled as a model.
 
-**[Live App](https://YOUR-DISTRIBUTION.cloudfront.net)** · Continue as guest, or sign up (browser-local) to keep a per-user run history.
+**[Live App](https://d2jwudtuujhq9x.cloudfront.net)** · backend API at [3.109.18.197.sslip.io](https://3.109.18.197.sslip.io/docs) · Continue as guest, or sign up (browser-local) to keep a per-user run history.
 
 Built for the **Weather Whiplash** hackathon problem statement — a live track-condition detector — and expanded into a compressed simulation of an F1 strategist's job across five circuits: Silverstone, Monaco, Spa-Francorchamps, Monza, Suzuka.
 
@@ -98,7 +98,7 @@ flowchart TB
 | Agent | **CrewAI** · `Qwen/Qwen2.5-7B-Instruct` via Hugging Face Inference Providers (`HF_LLM_MODEL` overridable) · deterministic fallback |
 | Data | **FastF1** (offline build → committed JSON) · **Open-Meteo** (`minutely_15` precipitation + probability, live) · NumPy / pandas regression |
 | Storage | None at runtime — circuit JSON read-only in memory · uploads + frames on local disk under `/media/{session}` (ephemeral) · accounts + run history in browser `localStorage` (no server-side users) |
-| Infra | **EC2** (`t3.medium` — CLIP needs ~4 GB) + **nginx** · **S3** + **CloudFront** (free HTTPS, path-routed) · AWS `ap-south-1` |
+| Infra | **EC2** `t3.micro` (free-tier, 2GB swapfile for CLIP headroom) + **nginx** + Let's Encrypt · **S3** + **CloudFront** (separate distribution for the frontend) · AWS `ap-south-1` |
 | Quality | strict `tsc` · oxlint · `test_strategy.py` · `test_weather_branches.py` (8/8) · `validate_replay.py` scores the optimiser against real 2023 race results |
 
 ---
@@ -167,22 +167,23 @@ uv run python scripts/build_circuit_data.py --telemetry-only   # fast: re-patch 
 
 ## Deployment
 
-Production is **EC2 + nginx + S3 + CloudFront** — one CloudFront distribution supplies the HTTPS URL and routes by path, so the frontend is built with relative URLs and there is no CORS or mixed content:
+**Live**: frontend at [d2jwudtuujhq9x.cloudfront.net](https://d2jwudtuujhq9x.cloudfront.net), backend API at [3.109.18.197.sslip.io](https://3.109.18.197.sslip.io/docs).
+
+Production is **EC2 (Docker) + nginx + S3 + CloudFront**, with the backend and frontend on separate origins rather than one path-routed distribution — CORS is wide open on the backend (`allow_origins=["*"]`), so there's no need to force them same-origin:
 
 ```
-browser ── https ──▶ CloudFront
-                       ├── default          → S3 (frontend dist/)
-                       └── /api/*, /media/* → EC2 :80 → nginx → uvicorn :8000
+browser ── https ──▶ CloudFront (S3 origin)        →  frontend
+browser ── https ──▶ nginx on EC2 (Let's Encrypt)  →  backend, proxied to the Docker container
 ```
 
-1. **EC2** — `t3.medium`, Ubuntu 24.04; `uv sync`; uvicorn as a `systemd` service; nginx from `deploy/nginx.conf` (raises `client_max_body_size` to 300 M and proxy timeouts to 300 s — the defaults reject video uploads and hang up mid-CLIP). Attach an **Elastic IP** so stop/start doesn't break the origin.
-2. **S3** — `VITE_API_BASE="" npm run build` → `aws s3 sync dist/ s3://bucket --delete`; bucket stays private, CloudFront reads it via Origin Access Control.
-3. **CloudFront** — S3 as default origin, EC2 as second origin; behaviors `/api/*` (all methods, caching disabled) and `/media/*` → EC2. Raise **origin response timeout** to 60 s in the console and request the free quota bump to 180 s — a lap analysis is 60–120 s of CLIP on CPU and 504s through the 30 s default otherwise.
-4. **Redeploy** — frontend: build → sync → `create-invalidation --paths "/*"`; backend: `git pull && sudo systemctl restart trackpulse`.
+1. **EC2** — `t3.micro` (free-tier eligible), Amazon Linux 2023, 2GB swapfile (CLIP's memory headroom on a 1GB instance), Docker. nginx terminates TLS and reverse-proxies to the container (`client_max_body_size 200M`, `proxy_read_timeout 300s` — CLIP inference on a free-tier CPU is slow). The TLS cert is Let's Encrypt for the instance's Elastic IP via `<ip>.sslip.io` — Let's Encrypt refuses to issue for `*.amazonaws.com`, so the instance's own AWS DNS name doesn't work; `sslip.io` is free magic DNS with no domain purchase needed.
+2. **S3 + CloudFront** — private bucket, CloudFront reads it via Origin Access Control (no public bucket access). Frontend built with `VITE_API_BASE` pointed at the backend's HTTPS URL.
+3. **Redeploy** — frontend: build → `aws s3 sync` → `create-invalidation --paths "/*"`; backend: tar the build context → scp → `docker build` → `docker run --restart unless-stopped`. Exact commands in the runbook below.
+4. **Pause / resume** — `deploy/pause.sh` stops the instance and releases its Elastic IP for true $0 while idle (EBS volume with the built image is kept); `deploy/resume.sh` starts it back up, reissues the TLS cert for the new IP, and redeploys the frontend against it. No time limit — pause for a day or three months, same script either way.
 
-Full click-by-click runbook with the systemd unit and every gotcha: [`deploy/AWS_DEPLOY.md`](./deploy/AWS_DEPLOY.md). A `backend/Dockerfile` (bakes CLIP weights into the image) is included for any Docker host.
+Full click-by-click runbook, every command actually run, and every tradeoff: [`deploy/README.md`](./deploy/README.md). A `backend/Dockerfile` (bakes CLIP weights into the image) works on any Docker host, not just this one.
 
-Cost discipline: `t3.medium` ≈ $1/day running — stop it when not demoing; S3 + CloudFront at demo traffic ≈ $0.
+Cost discipline: an AWS Budget alerts by email past set spend thresholds. Everything here fits free tier except the Elastic IP (~$0.005/hr once an account is past its first 12 months) — `deploy/pause.sh` is how to get that to $0 too.
 
 ---
 

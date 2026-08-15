@@ -138,8 +138,12 @@ backend/
   Dockerfile / .dockerignore # container build (bakes CLIP weights in); usable on any Docker host
 
 deploy/
-  nginx.conf                # EC2 reverse proxy: 300M uploads, 300s CLIP timeouts
-  AWS_DEPLOY.md             # the production runbook: EC2 + nginx + S3 + CloudFront
+  README.md                  # the production runbook: EC2 + nginx + Let's Encrypt + S3 + CloudFront
+  nginx-trackpulse.conf       # EC2 reverse proxy: 300M uploads, 300s CLIP timeouts
+  bootstrap.sh                 # EC2 first-boot setup (swap, Docker, nginx, certbot)
+  pause.sh / resume.sh          # stop the instance + release its IP for $0 downtime; bring it back
+  iam-policy-trackpulse-dev.json # least-privilege policy for the deploy IAM user
+  cloudfront-distribution-config.json, s3-bucket-policy.json  # frontend CDN config
 
 pptscript.md                # presentation / pitch script (uniqueness, architecture, algorithms, vision)
 
@@ -594,26 +598,37 @@ the backend at `localhost:8000` by default). The backend works fully without an
 `HF_TOKEN` (rule-based fallback everywhere the LLM would otherwise be used); add one to
 `backend/.env` to activate the real CrewAI agent step.
 
-## Deployment (AWS, 15 Aug 2026)
+## Deployment (AWS, live as of 15 Aug 2026)
 
-Production runs on AWS: **FastAPI on EC2** (`t3.medium` -- CLIP needs ~4GB; a micro
-OOMs) as a systemd service behind **nginx**, the built frontend in a private **S3**
-bucket, both unified behind **CloudFront**, which supplies the free HTTPS URL and routes
-by path (default → S3, `/api/*` and `/media/*` → EC2). Full click-by-click runbook,
-including the systemd unit and the CloudFront behaviors, is `deploy/AWS_DEPLOY.md`;
-the nginx config is `deploy/nginx.conf`.
+**Live now:**
+- Frontend: https://d2jwudtuujhq9x.cloudfront.net
+- Backend API: https://3.109.18.197.sslip.io (docs at `/docs`)
 
-Things that bite, all handled in the runbook -- read it before touching the deploy:
-- Build the frontend with **`VITE_API_BASE=""`** (empty string, not unset) so every API
-  and `/media` URL is relative and flows through CloudFront -- no CORS, no mixed content.
-- **CloudFront's origin response timeout** defaults to 30s (console max 60s); a lap
-  analysis takes 60-120s of CLIP on CPU, so `/api/analyze` 504s until the free Service
-  Quotas increase to 180s is approved. Demo with short clips meanwhile.
-- nginx needs `client_max_body_size 300M` and 300s proxy timeouts (in `nginx.conf`) --
-  the defaults reject video uploads (413) and hang up mid-analysis.
-- Put an **Elastic IP** on the instance; stop/start otherwise changes the public DNS and
-  silently breaks the CloudFront origin. Stop the instance when not demoing (~$1/day
-  running, pennies stopped).
+Production runs on AWS under a dedicated `trackpulse-dev` IAM user, separate from the
+account's other project. **Backend**: single EC2 `t3.micro` (free-tier eligible; a 2GB
+swapfile covers CLIP's memory headroom instead of paying for a bigger instance) running
+the backend in Docker, with **nginx terminating TLS and reverse-proxying** to it
+(`proxy_read_timeout 300s` -- CLIP inference on a free-tier CPU is slow). The TLS cert is
+Let's Encrypt for `<elastic-ip>.sslip.io` -- Let's Encrypt refuses to issue certificates
+for `*.amazonaws.com`, so the instance's own AWS-assigned DNS name doesn't work for this;
+`sslip.io` (free magic DNS: `<ip>.sslip.io` resolves to `<ip>`, no domain purchase needed)
+is the workaround, auto-renewed via cron. **Frontend**: a private S3 bucket behind its own
+CloudFront distribution (Origin Access Control, no public bucket access), built with
+`VITE_API_BASE` pointed at the backend's HTTPS URL -- CORS is wide open
+(`allow_origins=["*"]`) so this doesn't need to be same-origin.
+
+Full click-by-click runbook, every command actually run, and every tradeoff: see
+[`deploy/README.md`](./deploy/README.md).
+
+**Cost discipline**: everything here fits free tier except the Elastic IP, which AWS
+bills ~$0.005/hr regardless of instance state once an account is past its first 12
+months -- the one real recurring cost. An AWS Budget alerts by email if spend exceeds
+set thresholds. `deploy/pause.sh` stops the instance **and releases the Elastic IP**
+(true $0 while paused -- the EBS volume with the built image is kept, so nothing needs
+rebuilding); `deploy/resume.sh` starts it back up, allocates a fresh IP, reissues the
+TLS cert for the new `sslip.io` hostname, and rebuilds + redeploys the frontend against
+it. No time limit baked in -- pause for a day or three months, resume is the same script
+either way, just a new backend URL each time.
 
 `backend/Dockerfile` also exists (bakes the CLIP weights into the image) for any Docker
 host; it was written for Hugging Face Spaces before HF made Docker Spaces PRO-only.
