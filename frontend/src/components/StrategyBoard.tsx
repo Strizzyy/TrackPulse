@@ -70,6 +70,7 @@ function MiniStintBar({ option, totalLaps }: { option: StrategyOption; totalLaps
 export default function StrategyBoard({ report }: Props) {
   const { strategy, conditions, circuit_inputs, safety_car_risk } = report;
   const projected = report.projected_wetness_by_lap;
+  const usingReferenceDeg = circuit_inputs.degradation_in_use === "reference";
 
   const candidates = strategy.ranked.slice(0, 6);
   const [selectedPlan, setSelectedPlan] = useState(candidates[0]?.plan ?? strategy.recommended.plan);
@@ -146,11 +147,10 @@ export default function StrategyBoard({ report }: Props) {
                   setSelectedPlan(option.plan);
                   setAccepted(false);
                 }}
-                className={`grid grid-cols-12 items-center gap-2 rounded px-2 py-2 text-left transition-colors ${
-                  isSelected
-                    ? "border border-primary-fixed-dim/40 bg-primary-fixed-dim/10"
-                    : "border border-transparent hover:border-outline-variant/30 hover:bg-white/5"
-                }`}
+                className={`grid grid-cols-12 items-center gap-2 rounded px-2 py-2 text-left transition-colors ${isSelected
+                  ? "border border-primary-fixed-dim/40 bg-primary-fixed-dim/10"
+                  : "border border-transparent hover:border-outline-variant/30 hover:bg-white/5"
+                  }`}
               >
                 <div className="col-span-2 flex flex-col">
                   <span
@@ -219,11 +219,10 @@ export default function StrategyBoard({ report }: Props) {
             <button
               type="button"
               onClick={() => setAccepted(true)}
-              className={`flex w-full items-center justify-center gap-2 rounded border py-2.5 font-headline text-sm font-bold uppercase tracking-widest transition-all ${
-                accepted
-                  ? "border-primary-fixed-dim bg-primary-fixed-dim/20 text-primary-fixed-dim"
-                  : "border-primary-fixed-dim/60 bg-primary-fixed-dim/10 text-primary-fixed-dim hover:bg-primary-fixed-dim/20"
-              }`}
+              className={`flex w-full items-center justify-center gap-2 rounded border py-2.5 font-headline text-sm font-bold uppercase tracking-widest transition-all ${accepted
+                ? "border-primary-fixed-dim bg-primary-fixed-dim/20 text-primary-fixed-dim"
+                : "border-primary-fixed-dim/60 bg-primary-fixed-dim/10 text-primary-fixed-dim hover:bg-primary-fixed-dim/20"
+                }`}
             >
               <span className="material-symbols-outlined text-[18px]">check_circle</span>
               {accepted ? `Plan ${selected.plan} accepted` : `Accept ${selected.plan}`}
@@ -236,7 +235,8 @@ export default function StrategyBoard({ report }: Props) {
               Manual override
             </button>
             <p className="text-center text-[10px] text-outline">
-              Local only — the human strategist decides.
+              Kept in this browser tab only -- not sent anywhere. The human strategist stays the
+              decision-maker.
             </p>
           </div>
         </Panel>
@@ -246,15 +246,18 @@ export default function StrategyBoard({ report }: Props) {
         <Panel
           title="Projected track state across the race"
           right={
-            <span
-              title={`CLIP measured ${conditions.current_wetness} wetness and a ${conditions.slope_per_lap}/lap ${conditions.direction} trend across ${conditions.laps_analyzed} laps of real footage; this curve continues that trend over the race distance and decides which compounds are on the table (intermediates above 0.35).`}
-              className="cursor-help font-mono-data text-xs uppercase tracking-wider text-on-surface-variant"
-            >
-              from footage · red lines = stops
+            <span className="font-mono-data text-xs uppercase tracking-wider text-on-surface-variant">
+              From the uploaded footage -- red lines are the selected plan's stops
             </span>
           }
         >
           <RaceWetnessChart projected={projected} recommended={selected} />
+          <p className="mt-2 border-t border-outline-variant/20 pt-2 text-xs text-on-surface-variant">
+            CLIP measured {conditions.current_wetness} wetness and a {conditions.slope_per_lap}/lap{" "}
+            {conditions.direction} trend across {conditions.laps_analyzed} laps of real footage; this
+            curve continues that trend over the race distance. It decides which compounds are on the
+            table -- intermediates appear above 0.35 -- and therefore which plan wins.
+          </p>
         </Panel>
       )}
 
@@ -321,6 +324,46 @@ export default function StrategyBoard({ report }: Props) {
             </div>
           ))}
         </div>
+        <p className="mt-3 border-t border-outline-variant/20 pt-2 text-xs text-on-surface-variant">
+          A few seconds over a race distance is inside the noise of one safety car or a bad out-lap.
+        </p>
+      </Panel>
+
+      <Panel
+        title="Honest degradation"
+        right={
+          <span
+            className={`rounded-xs border px-2 py-0.5 font-mono-data text-xs font-bold uppercase tracking-wider ${usingReferenceDeg
+              ? "border-tertiary-fixed-dim/40 bg-tertiary-fixed-dim/10 text-tertiary-fixed-dim"
+              : "border-primary-fixed-dim/40 bg-primary-fixed-dim/10 text-primary-fixed-dim"
+              }`}
+          >
+            simulating on {circuit_inputs.degradation_in_use} values
+          </span>
+        }
+        bodyClassName="px-4 py-3"
+      >
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3">
+          {Object.entries(circuit_inputs.degradation ?? {}).map(([compound, values]) => (
+            <div key={compound} className="text-sm">
+              <span className="font-mono-data text-[11px] uppercase tracking-wider text-outline">
+                {compound}{" "}
+              </span>
+              <span className="font-mono-data tabular-nums text-on-surface">{values.s_per_lap}s/lap</span>
+              <span className="ml-1 font-mono-data text-xs tabular-nums text-outline">
+                (n={values.samples})
+              </span>
+            </div>
+          ))}
+        </div>
+        {usingReferenceDeg && (
+          <p className="mt-3 rounded-xs border border-tertiary-fixed-dim/40 bg-tertiary-fixed-dim/10 p-3 text-sm text-tertiary-fixed">
+            <span className="font-bold uppercase tracking-wider">Measured, not used: </span>
+            {circuit_inputs.degradation_note} The figures above are what real stint data produced;
+            the simulation runs on reference degradation instead, so it does not claim to be
+            driven by measured per-circuit wear.
+          </p>
+        )}
       </Panel>
 
       <Panel title="Inputs" bodyClassName="px-4 py-3">
@@ -355,7 +398,9 @@ export default function StrategyBoard({ report }: Props) {
           )}
         </div>
 
-        <p className="mt-2 text-xs leading-relaxed text-outline">{circuit_inputs.source}</p>
+        <p className="mt-2 text-xs leading-relaxed text-outline">
+          {circuit_inputs.source}. {strategy.note}
+        </p>
       </Panel>
     </div>
   );

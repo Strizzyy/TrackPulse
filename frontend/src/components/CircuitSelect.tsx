@@ -30,7 +30,7 @@ export default function CircuitSelect({ circuits, error, onSelect }: Props) {
         </h1>
         <p className="mt-1 flex items-center gap-2 font-mono-data text-[11px] uppercase tracking-widest text-on-surface-variant">
           <span className="h-1.5 w-1.5 rounded-full bg-primary-fixed-dim" />
-          Real FastF1 race history · 2019–2025
+          REAL-TIME WEATHER × RACE HISTORY × AI STRATEGY
         </p>
       </div>
 

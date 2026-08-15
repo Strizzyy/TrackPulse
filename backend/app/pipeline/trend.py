@@ -99,10 +99,49 @@ def compute_trend(frames: List[Dict], lap_duration_sec: float) -> Dict:
     }
 
 
+# Lap-consistency guard for per-corner reads (15 Aug 2026).
+#
+# Water on a circuit is spatially correlated: rain falls on the track, not on
+# one corner. So a corner reading "wet" (0.79) inside a lap whose overall
+# character is bone dry (median 0.15) is not a puddle -- it is the camera
+# pointing at something CLIP can't read. Measured case: a sunny, dry Monaco
+# onboard read Rascasse / Antony Noghes at 0.79-0.80 across several
+# consecutive frames (the crop band there is Pirelli barriers and a shaded
+# wall, almost no tarmac; at ~50 km/h that scene fills the band for 3-4 s so
+# temporal smoothing can't reject it, and CLIP was measured unable to tell
+# "road" from "barrier" in this crop -- see vision.py).
+#
+# The guard: a corner more than CORNER_OUTLIER_GAP above/below the lap median
+# is pulled toward the median by CORNER_SHRINK. It is anchored on the MEDIAN,
+# so a genuinely wet lap (median ~0.8) or a genuinely half-wet lap keeps its
+# spread -- only isolated outliers against a consistent lap are damped, and
+# their raw average is still returned as `avg_wetness_raw` so nothing is
+# hidden. Corners within the gap of the median are untouched.
+#
+# And it only fires when the lap is otherwise CONSISTENT: if the
+# interquartile range of corner averages is wide, the lap has genuine spread
+# (a drying line, half the circuit wet) and the guard stands down entirely so
+# real transitions are never flattened. A tight lap (IQR small) with a corner
+# sticking out is the artifact case. Measured on a synthetic half-wet lap
+# (IQR ~0.45): an outlier-count rule alone still pulled the genuinely dry end
+# of the lap up to "damp"; the IQR rule leaves it alone.
+CORNER_OUTLIER_GAP = 0.30
+CORNER_SHRINK = 0.6
+CORNER_CONSISTENT_IQR = 0.20
+
+
+def _median(values: List[float]) -> float:
+    s = sorted(values)
+    n = len(s)
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+
 def build_corner_summary(frames: List[Dict]) -> List[Dict]:
     """One entry per corner, including a representative real frame image --
     the frame whose own wetness score is closest to the corner's average,
-    so what's shown is an actual photo of that corner, not a swatch."""
+    so what's shown is an actual photo of that corner, not a swatch.
+
+    Applies the lap-consistency guard above to isolated outlier corners."""
     by_corner: Dict[str, List[Dict]] = {}
     order: List[str] = []
     for f in frames:
@@ -112,15 +151,33 @@ def build_corner_summary(frames: List[Dict]) -> List[Dict]:
             order.append(corner)
         by_corner[corner].append(f)
 
+    raw_avgs = {
+        corner: sum(f["wetness_score"] for f in by_corner[corner]) / len(by_corner[corner])
+        for corner in order
+    }
+    values = sorted(raw_avgs.values())
+    lap_median = _median(values) if values else 0.0
+    if len(values) >= 4:
+        q1, q3 = values[len(values) // 4], values[(3 * len(values)) // 4]
+        guard_active = (q3 - q1) <= CORNER_CONSISTENT_IQR
+    else:
+        guard_active = False
+
     summary = []
     for corner in order:
         corner_frames = by_corner[corner]
-        avg = sum(f["wetness_score"] for f in corner_frames) / len(corner_frames)
-        representative = min(corner_frames, key=lambda f: abs(f["wetness_score"] - avg))
+        raw_avg = raw_avgs[corner]
+        gap = raw_avg - lap_median
+        if guard_active and abs(gap) > CORNER_OUTLIER_GAP:
+            avg = lap_median + gap * (1.0 - CORNER_SHRINK)
+        else:
+            avg = raw_avg
+        representative = min(corner_frames, key=lambda f: abs(f["wetness_score"] - raw_avg))
         summary.append(
             {
                 "corner": corner,
                 "avg_wetness": round(avg, 3),
+                "avg_wetness_raw": round(raw_avg, 3),
                 "label": label_for_score(avg, 0.0),
                 "image_url": representative["image_url"],
             }
