@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { analyzeLap, analyzeSession, getCircuitDetail, getCircuits, planStrategy } from "./api";
+import { analyzeLap, analyzeSession, getCircuitDetail, getCircuits, getProgress, newJobId, planStrategy } from "./api";
+import type { JobProgress } from "./api";
 import type { CircuitDetail, CircuitSummary, SessionReport, StrategistReport, StrategyReport } from "./types";
 import { AuthProvider, useAuth, historyKeyFor } from "./auth/AuthContext";
 import AuthScreen from "./pages/AuthScreen";
@@ -15,6 +16,7 @@ import MultiLapView from "./components/MultiLapView";
 import StrategyBoard from "./components/StrategyBoard";
 import HistoryView from "./components/HistoryView";
 import Panel from "./components/Panel";
+import AnalysisProgress from "./components/AnalysisProgress";
 import { appendHistory, clearHistory, loadHistory } from "./history";
 import type { HistoryEntry, HistoryMode } from "./history";
 
@@ -45,6 +47,7 @@ function Workspace() {
   const [strategy, setStrategy] = useState<StrategyReport | null>(null);
 
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<JobProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [backendReachable, setBackendReachable] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -90,15 +93,30 @@ function Workspace() {
     setError(null);
   }
 
-  async function run(fn: () => Promise<void>) {
+  // Runs an upload/analysis while polling its live progress (the backend
+  // publishes per-stage + per-frame updates under the job_id we hand it).
+  async function run(fn: (jobId: string) => Promise<void>) {
+    const jobId = newJobId();
     setLoading(true);
     setError(null);
+    setProgress({ stage: "uploading", done: 0, total: 0, pct: 0 });
+    const poll = window.setInterval(() => {
+      getProgress(jobId)
+        .then((p) => setProgress(p))
+        .catch(() => {
+          /* a missed poll is not an error -- the bar just holds its last value */
+        });
+    }, 500);
     try {
-      await fn();
+      await fn(jobId);
+      setProgress({ stage: "done", done: 0, total: 0, pct: 100 });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      window.clearInterval(poll);
       setLoading(false);
+      // Let the bar sit at 100% for a beat before the results replace it.
+      window.setTimeout(() => setProgress(null), 400);
     }
   }
 
@@ -122,9 +140,9 @@ function Workspace() {
     e.target.value = "";
     if (!file || !circuitId) return;
     clearResults();
-    await run(async () => {
+    await run(async (jobId) => {
       if (mode === "lap") {
-        const r = await analyzeLap(file, circuitId);
+        const r = await analyzeLap(file, circuitId, jobId);
         setReport(r);
         recordHistory(
           "lap",
@@ -132,11 +150,11 @@ function Workspace() {
           `${r.current_condition.label} · ${r.current_condition.wetness_score.toFixed(2)} wetness · ${r.recommendation.tire_call}`,
         );
       } else if (mode === "session") {
-        const r = await analyzeSession(file, circuitId);
+        const r = await analyzeSession(file, circuitId, undefined, false, jobId);
         setSession(r);
         recordHistory("session", r, `${r.trend.direction} · ${r.lap_count} laps · ${r.recommendation.tire_call}`);
       } else {
-        const r = await planStrategy(circuitId, file);
+        const r = await planStrategy(circuitId, file, undefined, jobId);
         setStrategy(r);
         recordHistory(
           "strategy",
@@ -290,7 +308,7 @@ function Workspace() {
               <div className="flex flex-wrap items-center gap-3">
                 {loading && (
                   <span className="animate-pulse font-mono-data text-xs font-semibold uppercase tracking-widest text-primary-fixed-dim">
-                    Processing frames — CLIP scoring in progress
+                    Analysis running…
                   </span>
                 )}
                 {error && (
@@ -326,6 +344,8 @@ function Workspace() {
                 />
               </div>
             </div>
+
+            {loading && <AnalysisProgress progress={progress} mode={mode} />}
 
             {nothingLoaded && (
               <Panel title="Awaiting telemetry" bodyClassName="p-0" tactical>

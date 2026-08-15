@@ -13,11 +13,12 @@ load_dotenv()
 from typing import Optional  # noqa: E402
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile  # noqa: E402
+from fastapi.concurrency import run_in_threadpool  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 from app.agents import crew as strategist_crew  # noqa: E402
-from app.pipeline import circuits, history, optimizer, strategy, vision, weather  # noqa: E402
+from app.pipeline import circuits, history, optimizer, progress, strategy, vision, weather  # noqa: E402
 from app.pipeline import frames as frames_module  # noqa: E402
 from app.pipeline import session as session_module  # noqa: E402
 from app.pipeline import trend as trend_module  # noqa: E402
@@ -100,20 +101,48 @@ def get_circuit(circuit_id: str):
     return circuit
 
 
-def _score_video(session_id: str, video: UploadFile, corners: list, lap_duration_sec: float):
+@app.get("/api/progress/{job_id}")
+def get_progress(job_id: str):
+    """Live progress for an in-flight analysis. The frontend generates the
+    job_id, sends it as a form field with the upload, and polls this while
+    waiting. Unknown/expired ids return a neutral 'queued' state rather than
+    404 so a poll that lands before the first update isn't an error."""
+    job = progress.get(job_id)
+    return job or {"stage": "queued", "done": 0, "total": 0, "pct": 0.0}
+
+
+# Progress-bar stage weights (percent of the bar each stage owns). CLIP
+# scoring dominates wall-clock, so it gets most of the bar; the frontend
+# polls GET /api/progress/{job_id} while its upload request is in flight.
+_PCT_SAVED, _PCT_EXTRACTED, _PCT_SCORED = 5.0, 15.0, 92.0
+
+
+def _clip_progress(job_id):
+    def cb(done, total):
+        progress.update(
+            job_id, "scoring", done, total,
+            pct=_PCT_EXTRACTED + (_PCT_SCORED - _PCT_EXTRACTED) * (done / total if total else 1.0),
+        )
+    return cb
+
+
+def _score_video(session_id: str, video: UploadFile, corners: list, lap_duration_sec: float, job_id: str = None):
     """Shared vision pass: save upload -> extract frames -> CLIP score -> drop
     non-racing -> map to corners. Used by the session and strategy endpoints;
     /api/analyze keeps its own inlined copy so it cannot be broken from here."""
     session_dir = os.path.join(UPLOAD_DIR, session_id)
     os.makedirs(session_dir, exist_ok=True)
 
+    progress.update(job_id, "uploading", pct=0.0)
     video_path = os.path.join(session_dir, "lap.mp4")
     with open(video_path, "wb") as f:
         shutil.copyfileobj(video.file, f)
+    progress.update(job_id, "extracting", pct=_PCT_SAVED)
 
     frame_dir = os.path.join(session_dir, "frames")
     extracted = frames_module.extract_frames(video_path, frame_dir, max_frames=SESSION_MAX_FRAMES)
-    analyses = vision.analyze_frames([f["path"] for f in extracted])
+    progress.update(job_id, "scoring", 0, len(extracted), pct=_PCT_EXTRACTED)
+    analyses = vision.analyze_frames([f["path"] for f in extracted], on_progress=_clip_progress(job_id))
 
     enriched = []
     dropped = 0
@@ -142,6 +171,7 @@ async def analyze_session(
     circuit_id: str = Form("silverstone"),
     lap_duration_sec: Optional[float] = Form(None),
     simulated: bool = Form(False),
+    job_id: Optional[str] = Form(None),
 ):
     """Multi-lap analysis: a real trend over TIME rather than over track
     position. See app/pipeline/session.py for why the single-lap slope was
@@ -154,7 +184,10 @@ async def analyze_session(
     session_id = str(uuid.uuid4())
     corner_defs = circuits.corners_for_mapping(circuit)
 
-    enriched, dropped = _score_video(session_id, video, corner_defs, lap_duration)
+    # CLIP is synchronous CPU work; off the event loop so /api/progress polls
+    # (and everything else) keep getting answered while it runs.
+    enriched, dropped = await run_in_threadpool(_score_video, session_id, video, corner_defs, lap_duration, job_id)
+    progress.update(job_id, "analysing", pct=95.0)
     session_module.segment_laps(enriched, lap_duration)
     lap_summaries = session_module.build_lap_summaries(enriched)
     # Excludes sparse/partial laps (almost always the tail end of an upload
@@ -227,6 +260,7 @@ async def strategy_plan(
     video: Optional[UploadFile] = File(None),
     lap_duration_sec: Optional[float] = Form(None),
     race_laps: Optional[int] = Form(None),
+    job_id: Optional[str] = Form(None),
 ):
     """Full race strategy: enumerate pit plans, simulate each, rank by total
     race time. If a lap video is supplied, the CLIP wetness read seeds the
@@ -243,9 +277,10 @@ async def strategy_plan(
     if video is not None:
         lap_duration = lap_duration_sec or circuit.get("avg_lap_time_sec") or 90.0
         session_id = str(uuid.uuid4())
-        enriched, _ = _score_video(
-            session_id, video, circuits.corners_for_mapping(circuit), lap_duration
+        enriched, _ = await run_in_threadpool(
+            _score_video, session_id, video, circuits.corners_for_mapping(circuit), lap_duration, job_id
         )
+        progress.update(job_id, "simulating", pct=95.0)
         session_module.segment_laps(enriched, lap_duration)
         lap_summaries = session_module.build_lap_summaries(enriched)
         # Same partial-lap exclusion as /api/analyze-session -- a sparse tail
@@ -306,17 +341,24 @@ async def strategy_plan(
 
 
 @app.post("/api/analyze")
-async def analyze(video: UploadFile = File(...), circuit_id: str = Form("silverstone")):
+async def analyze(
+    video: UploadFile = File(...),
+    circuit_id: str = Form("silverstone"),
+    job_id: Optional[str] = Form(None),
+):
     session_id = str(uuid.uuid4())
     session_dir = os.path.join(UPLOAD_DIR, session_id)
     os.makedirs(session_dir, exist_ok=True)
 
+    progress.update(job_id, "uploading", pct=0.0)
     video_path = os.path.join(session_dir, "lap.mp4")
     with open(video_path, "wb") as f:
         shutil.copyfileobj(video.file, f)
+    progress.update(job_id, "extracting", pct=_PCT_SAVED)
 
     frame_dir = os.path.join(session_dir, "frames")
-    extracted = frames_module.extract_frames(video_path, frame_dir)
+    extracted = await run_in_threadpool(frames_module.extract_frames, video_path, frame_dir)
+    progress.update(job_id, "scoring", 0, len(extracted), pct=_PCT_EXTRACTED)
 
     # circuit_id="silverstone" (the default, and the only option before the
     # 5-circuit picker existed) keeps using the original hand-made
@@ -348,7 +390,10 @@ async def analyze(video: UploadFile = File(...), circuit_id: str = Form("silvers
     # footage) in one CLIP pass per frame. Real YouTube clips often have
     # title cards / sponsor bumpers spliced in -- those get dropped here
     # instead of being scored as if they were track conditions.
-    analyses = vision.analyze_frames([f["path"] for f in extracted])
+    analyses = await run_in_threadpool(
+        vision.analyze_frames, [f["path"] for f in extracted], _clip_progress(job_id)
+    )
+    progress.update(job_id, "analysing", pct=_PCT_SCORED)
 
     enriched = []
     dropped_non_racing = 0

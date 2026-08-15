@@ -18,10 +18,31 @@ export async function getTrack(): Promise<Track> {
   return res.json();
 }
 
-export async function analyzeLap(video: File, circuitId = "silverstone"): Promise<StrategistReport> {
+/** Live progress of an in-flight upload/analysis, keyed by the job_id the
+ * caller generated and passed to analyzeLap/analyzeSession/planStrategy. */
+export interface JobProgress {
+  stage: "queued" | "uploading" | "extracting" | "scoring" | "analysing" | "simulating" | "done" | string;
+  done: number;
+  total: number;
+  pct: number;
+}
+
+export function newJobId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+export async function getProgress(jobId: string): Promise<JobProgress> {
+  const res = await fetch(`${API_BASE}/api/progress/${jobId}`);
+  if (!res.ok) throw new Error(`progress ${res.status}`);
+  return res.json();
+}
+
+export async function analyzeLap(video: File, circuitId = "silverstone", jobId?: string): Promise<StrategistReport> {
   const form = new FormData();
   form.append("video", video);
   form.append("circuit_id", circuitId);
+  if (jobId) form.append("job_id", jobId);
   const res = await fetch(`${API_BASE}/api/analyze`, { method: "POST", body: form });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -50,12 +71,14 @@ export async function analyzeSession(
   circuitId: string,
   lapDurationSec?: number,
   simulated = false,
+  jobId?: string,
 ): Promise<SessionReport> {
   const form = new FormData();
   form.append("video", video);
   form.append("circuit_id", circuitId);
   if (lapDurationSec) form.append("lap_duration_sec", String(lapDurationSec));
   form.append("simulated", String(simulated));
+  if (jobId) form.append("job_id", jobId);
   return post(`${API_BASE}/api/analyze-session`, form, "Session analysis");
 }
 
@@ -64,11 +87,13 @@ export async function planStrategy(
   circuitId: string,
   video?: File | null,
   raceLaps?: number,
+  jobId?: string,
 ): Promise<StrategyReport> {
   const form = new FormData();
   form.append("circuit_id", circuitId);
   if (video) form.append("video", video);
   if (raceLaps) form.append("race_laps", String(raceLaps));
+  if (jobId) form.append("job_id", jobId);
   return post(`${API_BASE}/api/strategy/plan`, form, "Strategy plan");
 }
 

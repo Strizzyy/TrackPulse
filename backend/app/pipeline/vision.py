@@ -224,12 +224,20 @@ def smooth_wetness(scores: List[float], window: int = SMOOTH_WINDOW) -> List[flo
     return out
 
 
-def analyze_frames(image_paths: List[str]) -> List[Dict[str, float]]:
+def analyze_frames(image_paths: List[str], on_progress=None) -> List[Dict[str, float]]:
     """Per-frame wetness + racing confidence for a whole clip, with the
     wetness series temporally median-smoothed (see smooth_wetness). The raw
     per-frame value is kept as `wetness_raw` so calibration scripts and the
-    curious can still see what CLIP said about each frame on its own."""
-    results = [analyze_frame(p) for p in image_paths]
+    curious can still see what CLIP said about each frame on its own.
+
+    on_progress(done, total), if given, is called after each frame -- this is
+    the slow loop (~0.2-1s/frame on CPU) that the UI progress bar tracks."""
+    results = []
+    total = len(image_paths)
+    for i, p in enumerate(image_paths):
+        results.append(analyze_frame(p))
+        if on_progress:
+            on_progress(i + 1, total)
     smoothed = smooth_wetness([r["wetness"] for r in results])
     for r, s in zip(results, smoothed):
         r["wetness_raw"] = r["wetness"]
