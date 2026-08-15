@@ -184,16 +184,3 @@ browser ── https ──▶ nginx on EC2 (Let's Encrypt)  →  backend, proxi
 Full click-by-click runbook, every command actually run, and every tradeoff: [`deploy/README.md`](./deploy/README.md). A `backend/Dockerfile` (bakes CLIP weights into the image) works on any Docker host, not just this one.
 
 Cost discipline: an AWS Budget alerts by email past set spend thresholds. Everything here fits free tier except the Elastic IP (~$0.005/hr once an account is past its first 12 months) — `deploy/pause.sh` is how to get that to $0 too.
-
----
-
-## Honesty notes (read before demoing)
-
-- **Degradation is measured but often not trusted.** Real stint data conflates wear with track evolution and comes out non-monotonic (hard "wearing" faster than soft). The build flags such circuits `degradation_confidence: low` and the simulator runs on a reference curve — the UI badge says which. Never claim measured per-circuit wear drives the sim when it reads "reference".
-- **Per-corner tyre stress is a model** (frictional work over real telemetry), not a measurement — labelled via `corner_wear_note` and the panel tooltip. It distributes real per-lap degradation across corners; it never invents a total.
-- **The track map is one fast lap's racing line**, not the track edges.
-- **Traffic and track position are not modelled** — the board says so whenever a lower-stop plan is within 15 s of optimal.
-- **Vertical (9:16) video is out of scope** for the vision model. Don't demo with it.
-- Validation against real 2023 races: stop count right 2/4, compound set 2/4, mean race-time error 4.6% — quote it as-is (and re-run `validate_replay.py` for Spa; the earlier number was computed on the wrong circuit).
-
-More: [`CONTEXT.md`](./CONTEXT.md) (architecture, contract, every judgement call) · [`HANDOFF.md`](./HANDOFF.md) (session-by-session change log) · [`pptscript.md`](./pptscript.md) (pitch script).
