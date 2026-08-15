@@ -23,3 +23,10 @@ backend/.env
 backend/reference_footage/
 frontend/node_modules/
 frontend/dist/
+
+# AWS deployment secrets/local state -- never commit. Dotfiles under
+# deploy/ are per-run resource IDs/IPs written by the provisioning
+# commands (see deploy/README.md), not project source.
+deploy/*.pem
+deploy/.*
+deploy/*_output.json

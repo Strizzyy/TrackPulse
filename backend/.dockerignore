@@ -1,0 +1,15 @@
+# Only backend/data/uploads/ lives at this top level (runtime-generated,
+# recreated by the Dockerfile) -- the real committed data (circuits/*.json,
+# sc_stats.json, silverstone.json) is under app/data/ and is NOT excluded.
+data/uploads/*
+!data/uploads/.gitkeep
+
+.venv/
+.hf_cache/
+.fastf1cache/
+.env
+__pycache__/
+*.pyc
+reference_footage/
+.git/
+.pytest_cache/
