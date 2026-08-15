@@ -122,6 +122,15 @@ RACING_PROMPTS = (
 
 RACING_THRESHOLD = 0.5
 
+# Tried and REJECTED (15 Aug 2026): a second CLIP gate on the crop asking
+# "is there actually road here, or just barriers/walls/sky?", to stop trusting
+# the wetness read where the band has no tarmac (Monaco's walls). Measured on
+# hand-picked frames it does not work -- CLIP scored a frame whose crop is
+# pure straight tarmac (Monza f19) at P(road)=0.03 under the best wording, and
+# 3 prompt variants all flagged 80-90% of clearly-road frames as "no road".
+# The gate was noise that happened to land right on three clips; shipping it
+# would have silently overridden most frames on false pretences. Not used.
+
 _model = None
 _processor = None
 _dry_wet_text_features: List[torch.Tensor] = []
